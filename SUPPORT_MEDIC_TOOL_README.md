@@ -1,6 +1,6 @@
-# Cloud Medic Assistant Tool
+# Support Medic Assistant Tool
 
-A Python CLI tool that streamlines n8n Cloud Support Medic operations with an interactive menu system.
+A Python CLI tool that streamlines n8n Support Medic operations with an interactive menu system.
 
 ## Features
 
@@ -24,17 +24,17 @@ A Python CLI tool that streamlines n8n Cloud Support Medic operations with an in
 ### Option 1: Direct Run (No Installation)
 
 ```bash
-python3 cloud_medic_tool.py
+python3 support_medic_tool.py
 ```
 
 ### Option 2: Make it Globally Accessible
 
 ```bash
 # Make executable
-chmod +x cloud_medic_tool.py
+chmod +x support_medic_tool.py
 
 # Move to /usr/local/bin (or any directory in your PATH)
-sudo cp cloud_medic_tool.py /usr/local/bin/cloudmedic
+sudo cp support_medic_tool.py /usr/local/bin/cloudmedic
 
 # Now run from anywhere:
 cloudmedic
@@ -45,7 +45,7 @@ cloudmedic
 Add to your `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-alias cloudmedic="python3 /path/to/cloud_medic_tool.py"
+alias cloudmedic="python3 /path/to/support_medic_tool.py"
 ```
 
 Then run:
@@ -59,7 +59,7 @@ cloudmedic
 ### 1. Launch the Tool
 
 ```bash
-python3 cloud_medic_tool.py
+python3 support_medic_tool.py
 # or
 cloudmedic  # if installed globally
 ```
@@ -166,7 +166,7 @@ View execution data (error details)? (y/n): y
 
 - **Exported workflows:** `~/Downloads/<workspace>-workflows-<date>.json.gz`
 - **Backup exports:** `~/Downloads/<workspace>-workflows-backup-<date>.zip`
-- **Tool location:** Wherever you placed `cloud_medic_tool.py`
+- **Tool location:** Wherever you placed `support_medic_tool.py`
 
 ## Tips
 
@@ -176,10 +176,10 @@ For fastest access, I recommend:
 
 ```bash
 # 1. Make executable
-chmod +x cloud_medic_tool.py
+chmod +x support_medic_tool.py
 
 # 2. Move to bin
-sudo cp cloud_medic_tool.py /usr/local/bin/cloudmedic
+sudo cp support_medic_tool.py /usr/local/bin/cloudmedic
 
 # 3. Create short alias
 echo 'alias cm="cloudmedic"' >> ~/.zshrc
@@ -235,7 +235,7 @@ Verify:
 
 Make the script executable:
 ```bash
-chmod +x cloud_medic_tool.py
+chmod +x support_medic_tool.py
 ```
 
 ### Downloads not working

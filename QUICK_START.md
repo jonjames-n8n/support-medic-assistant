@@ -1,4 +1,4 @@
-# Cloud Medic Tool - Quick Start
+# Support Medic Tool - Quick Start
 
 ## Install (30 seconds)
 

@@ -37,10 +37,10 @@ echo
 
 # Get script location
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-TOOL_PATH="$SCRIPT_DIR/cloud_medic_tool.py"
+TOOL_PATH="$SCRIPT_DIR/support_medic_tool.py"
 
 if [ ! -f "$TOOL_PATH" ]; then
-    echo "❌ cloud_medic_tool.py not found in current directory"
+    echo "❌ support_medic_tool.py not found in current directory"
     exit 1
 fi
 
@@ -53,7 +53,7 @@ echo
 echo "Installation options:"
 echo "1. Install globally (requires sudo) - run as 'cloudmedic'"
 echo "2. Create alias only - run as 'cloudmedic'"
-echo "3. Skip - run manually with 'python3 cloud_medic_tool.py'"
+echo "3. Skip - run manually with 'python3 support_medic_tool.py'"
 echo
 
 read -p "Choose option (1/2/3): " option

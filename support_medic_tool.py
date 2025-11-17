@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool
-Interactive CLI for n8n Cloud Support operations
+Support Medic Assistant Tool v1.1
+Interactive CLI for n8n Support Medic operations
+
+Changelog v1.1:
+- Added VPN connection reminder
+- Simplified cluster input (just number)
+- Added guided DB troubleshooting menu
 """
 
 import subprocess
@@ -27,6 +32,7 @@ class CloudMedicTool:
     def __init__(self):
         self.workspace = None
         self.cluster = None
+        self.cluster_number = None  # For simplified cluster reference
         self.pod_name = None
         self.downloads_dir = Path.home() / "Downloads"
         
@@ -88,10 +94,18 @@ class CloudMedicTool:
     
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup")
+        self.print_header("Cloud Medic Assistant - Setup v1.1")
+        
+        # VPN reminder
+        self.print_warning("REMINDER: Make sure you're connected to the VPN!")
+        print()
         
         self.workspace = self.get_input("Enter workspace name: ")
-        self.cluster = self.get_input("Enter cluster (e.g., prod-users-gwc-48): ")
+        
+        # Simplified cluster input
+        cluster_input = self.get_input("Enter cluster number (e.g., 48 for prod-users-gwc-48): ")
+        self.cluster_number = cluster_input
+        self.cluster = f"prod-users-gwc-{cluster_input}"
         
         # Switch to cluster
         self.print_info(f"Switching to cluster {self.cluster}...")
@@ -132,7 +146,7 @@ class CloudMedicTool:
             ("8", "Cancel waiting executions", self.cancel_waiting_executions),
             ("9", "Take backup", self.take_backup),
             ("10", "View recent logs", self.view_logs),
-            ("11", "Open database shell", self.open_database_shell),
+            ("11", "Database troubleshooting (guided)", self.database_troubleshooting),
             ("12", "Redeploy instance (cloudbot)", self.redeploy_instance),
             ("13", "Change workspace/cluster", self.setup_workspace),
             ("q", "Quit", None)
@@ -153,6 +167,182 @@ class CloudMedicTool:
         
         self.print_error("Invalid option. Please try again.")
         return True
+    
+    def database_troubleshooting(self):
+        """Show database troubleshooting menu"""
+        while True:
+            self.print_header("Database Troubleshooting")
+            
+            troubleshooting_options = [
+                ("1", "Check crashloop causes", self.check_crashloop_causes),
+                ("2", "View workflow history", self.view_workflow_history),
+                ("3", "List all workflows", self.list_workflows),
+                ("4", "View recent errors", self.view_recent_errors),
+                ("5", "Check database info", self.check_database_info),
+                ("6", "View webhooks", self.view_webhooks),
+                ("7", "Find problematic workflows", self.find_problematic_workflows),
+                ("8", "Raw SQL shell (advanced)", self.open_database_shell),
+                ("9", "Back to main menu", None)
+            ]
+            
+            for key, description, _ in troubleshooting_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+            
+            print()
+            choice = self.get_input("Select troubleshooting option: ", required=False)
+            
+            if choice == '9':
+                break
+            
+            for key, _, func in troubleshooting_options:
+                if choice == key and func:
+                    func()
+                    break
+    
+    def check_crashloop_causes(self):
+        """Check common crashloop causes"""
+        self.print_header("Crashloop Analysis")
+        
+        self.print_info("Checking pending executions...")
+        sql_cmd = "SELECT COUNT(*) FROM execution_entity WHERE status = 'new';"
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        pending_count = self.run_command(db_cmd)
+        
+        if pending_count and int(pending_count) > 0:
+            print(f"{Colors.RED}⚠ Pending: {pending_count}{Colors.END}")
+            if int(pending_count) > 100:
+                print(f"{Colors.RED}  HIGH - Could cause crashloop{Colors.END}")
+        else:
+            print(f"{Colors.GREEN}✓ Pending: 0{Colors.END}")
+        
+        self.print_info("Checking waiting executions...")
+        sql_cmd = "SELECT COUNT(*) FROM execution_entity WHERE status = 'waiting';"
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        waiting_count = self.run_command(db_cmd)
+        
+        if waiting_count and int(waiting_count) > 0:
+            print(f"{Colors.YELLOW}⚠ Waiting: {waiting_count}{Colors.END}")
+        else:
+            print(f"{Colors.GREEN}✓ Waiting: 0{Colors.END}")
+        
+        print()
+        self.print_info("Recommendations:")
+        if pending_count and int(pending_count) > 100:
+            print("  • Cancel pending executions (Option 7)")
+        if waiting_count and int(waiting_count) > 0:
+            print("  • Cancel waiting executions (Option 8)")
+        else:
+            print("  • Check Grafana for memory issues")
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+    
+    def view_workflow_history(self):
+        """View workflow execution stats"""
+        self.print_header("Workflow History")
+        
+        workflow_id = self.get_input("Workflow ID (or Enter for all): ", required=False)
+        
+        if workflow_id:
+            sql_cmd = f"SELECT status, COUNT(*) FROM execution_entity WHERE workflowId = '{workflow_id}' GROUP BY status;"
+            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+            print(f"\n{Colors.BOLD}Execution Counts:{Colors.END}")
+            self.run_command(db_cmd, capture_output=False)
+        else:
+            sql_cmd = "SELECT status, COUNT(*) FROM execution_entity GROUP BY status;"
+            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+            print(f"\n{Colors.BOLD}All Executions:{Colors.END}")
+            self.run_command(db_cmd, capture_output=False)
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+    
+    def list_workflows(self):
+        """List all workflows"""
+        self.print_header("All Workflows")
+        
+        sql_cmd = "SELECT id, name, active FROM workflow_entity ORDER BY active DESC, name;"
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        self.run_command(db_cmd, capture_output=False)
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+    
+    def view_recent_errors(self):
+        """View recent errors"""
+        self.print_header("Recent Errors")
+    
+        limit = self.get_input("Number to show (default 10): ", required=False) or "10"
+    
+        self.print_info(f"Fetching last {limit} errors...")
+    
+        # Add headers to make it clear
+        print(f"\n{Colors.BOLD}Execution ID | Workflow ID | Workflow Name | Started At{Colors.END}")
+        print("-" * 80)
+    
+        sql_cmd = f"SELECT e.id, e.workflowId, w.name, e.startedAt FROM execution_entity e LEFT JOIN workflow_entity w ON e.workflowId = w.id WHERE e.status IN ('error', 'crashed', 'failed') ORDER BY e.startedAt DESC LIMIT {limit};"
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        self.run_command(db_cmd, capture_output=False)
+    
+        print()  # Add spacing
+    
+        if self.confirm("\nView error details for a specific execution?"):
+            exec_id = self.get_input("Enter execution ID from the list above: ")
+            self.print_info("Fetching error details...")
+            sql_cmd = f"SELECT data FROM execution_data WHERE executionId = '{exec_id}';"
+            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+            print()
+            self.run_command(db_cmd, capture_output=False)
+    
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+    
+    def check_database_info(self):
+        """Check database size"""
+        self.print_header("Database Info")
+        
+        size_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite"
+        print(f"\n{Colors.BOLD}Size:{Colors.END}")
+        self.run_command(size_cmd, capture_output=False)
+        
+        tables = [("workflow_entity", "Workflows"), ("execution_entity", "Executions"), 
+                  ("webhook_entity", "Webhooks"), ("credentials_entity", "Credentials")]
+        
+        print(f"\n{Colors.BOLD}Counts:{Colors.END}")
+        for table, label in tables:
+            sql_cmd = f"SELECT COUNT(*) FROM {table};"
+            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+            count = self.run_command(db_cmd)
+            if count:
+                print(f"{label}: {count}")
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+    
+    def view_webhooks(self):
+        """View webhooks"""
+        self.print_header("Webhooks")
+        
+        sql_cmd = "SELECT webhookPath, workflowId, method FROM webhook_entity;"
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        self.run_command(db_cmd, capture_output=False)
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+    
+    def find_problematic_workflows(self):
+        """Find problematic workflows"""
+        self.print_header("Problematic Workflows")
+        
+        sql_cmd = """
+        SELECT w.id, w.name, 
+            COUNT(CASE WHEN e.status IN ('error', 'crashed') THEN 1 END) as errors,
+            COUNT(*) as total
+        FROM execution_entity e
+        JOIN workflow_entity w ON e.workflowId = w.id
+        GROUP BY w.id
+        HAVING errors > 0
+        ORDER BY errors DESC
+        LIMIT 10;
+        """
+        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+        self.run_command(db_cmd, capture_output=False)
+        
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
     
     def export_workflows(self):
         """Export workflows from live instance"""
