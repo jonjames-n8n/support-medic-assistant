@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Support Medic Assistant Tool v1.1
-Interactive CLI for n8n Support Medic operations
+Cloud Medic Assistant Tool v1.1
+Interactive CLI for n8n Cloud Support operations
 
 Changelog v1.1:
 - Added VPN connection reminder
-- Simplified cluster input (just number)
-- Added guided DB troubleshooting menu
+- Simplified cluster input (just number, e.g., "48")
+- Added guided DB troubleshooting menu with pre-built queries
+- Better error handling for database queries
+- Health check feature (option 0)
 """
 
 import subprocess
@@ -32,7 +34,7 @@ class CloudMedicTool:
     def __init__(self):
         self.workspace = None
         self.cluster = None
-        self.cluster_number = None  # For simplified cluster reference
+        self.cluster_number = None
         self.pod_name = None
         self.downloads_dir = Path.home() / "Downloads"
         
@@ -79,6 +81,24 @@ class CloudMedicTool:
                 print(f"{Colors.RED}{e.stderr}{Colors.END}")
             return None
     
+    def run_db_query(self, sql_cmd, show_error_details=True):
+        """Run database query with better error handling"""
+        try:
+            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
+            result = self.run_command(db_cmd, capture_output=True, check=True)
+            return result
+        except Exception as e:
+            self.print_error("Database query failed - connection issue or data too large")
+            if show_error_details:
+                self.print_info("Possible causes:")
+                print("  • Network/VPN connection interrupted")
+                print("  • Pod restarted during query")
+                print("  • Data size too large to transfer")
+                print("  • Execution ID doesn't exist")
+            if self.confirm("\nRetry query?"):
+                return self.run_db_query(sql_cmd, show_error_details=False)
+            return None
+    
     def get_input(self, prompt, required=True):
         """Get user input with optional validation"""
         while True:
@@ -113,7 +133,7 @@ class CloudMedicTool:
         if result is not None:
             self.print_success(f"Switched to cluster: {self.cluster}")
         else:
-            self.print_error("Failed to switch cluster. Please verify cluster name.")
+            self.print_error("Failed to switch cluster. Please verify cluster number.")
             return False
         
         # Get pod name
@@ -136,6 +156,7 @@ class CloudMedicTool:
         print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
         
         menu_options = [
+            ("0", "Health check (quick status)", self.health_check),
             ("1", "Export workflows (from live instance)", self.export_workflows),
             ("2", "Export workflows (from backup)", self.export_from_backup),
             ("3", "Import workflows", self.import_workflows),
@@ -167,6 +188,96 @@ class CloudMedicTool:
         
         self.print_error("Invalid option. Please try again.")
         return True
+    
+    def health_check(self):
+        """Quick health check of pod and database"""
+        self.print_header("Health Check")
+        
+        # Pod status
+        self.print_info("Checking pod status...")
+        pod_status_cmd = f"kubectl get pod {self.pod_name} -n {self.workspace} -o jsonpath='{{.status.phase}} {{.status.containerStatuses[*].ready}} {{.status.containerStatuses[*].restartCount}} {{.metadata.creationTimestamp}}'"
+        pod_status = self.run_command(pod_status_cmd)
+        
+        if pod_status:
+            parts = pod_status.split()
+            phase = parts[0] if len(parts) > 0 else "Unknown"
+            ready = parts[1] if len(parts) > 1 else "Unknown"
+            restarts = parts[2] if len(parts) > 2 else "0"
+            created = parts[3] if len(parts) > 3 else "Unknown"
+            
+            print(f"\n{Colors.BOLD}Pod Status:{Colors.END}")
+            
+            # Phase status
+            if phase == "Running":
+                print(f"  Status: {Colors.GREEN}✓ {phase}{Colors.END}")
+            else:
+                print(f"  Status: {Colors.RED}✗ {phase}{Colors.END}")
+            
+            # Container ready status
+            if "true" in ready.lower():
+                print(f"  Containers: {Colors.GREEN}✓ Ready{Colors.END}")
+            else:
+                print(f"  Containers: {Colors.YELLOW}⚠ Not all ready{Colors.END}")
+            
+            # Restart count - handle multiple containers
+            try:
+                restart_counts = [int(r) for r in restarts.split() if r.isdigit()]
+                restart_count = max(restart_counts) if restart_counts else 0
+            except (ValueError, AttributeError):
+                restart_count = 0
+            
+            if restart_count == 0:
+                print(f"  Restarts: {Colors.GREEN}✓ 0{Colors.END}")
+            elif restart_count < 5:
+                print(f"  Restarts: {Colors.YELLOW}⚠ {restart_count}{Colors.END}")
+            else:
+                print(f"  Restarts: {Colors.RED}✗ {restart_count} (Check logs!){Colors.END}")
+            
+            print(f"  Age: {created}")
+        
+        # Database size
+        self.print_info("\nChecking database size...")
+        size_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
+        db_size = self.run_command(size_cmd)
+        if db_size:
+            print(f"{Colors.BOLD}Database Size:{Colors.END} {db_size}")
+        
+        # Active workflows count
+        sql_cmd = "SELECT COUNT(*) FROM workflow_entity WHERE active = 1;"
+        active_wf = self.run_db_query(sql_cmd, show_error_details=False)
+        if active_wf:
+            print(f"{Colors.BOLD}Active Workflows:{Colors.END} {active_wf}")
+        
+        # Total executions
+        sql_cmd = "SELECT COUNT(*) FROM execution_entity;"
+        total_exec = self.run_db_query(sql_cmd, show_error_details=False)
+        if total_exec:
+            print(f"{Colors.BOLD}Total Executions:{Colors.END} {total_exec}")
+        
+        # Recent errors (last 24h)
+        self.print_info("\nChecking recent errors (last 24h)...")
+        sql_cmd = "SELECT COUNT(*) FROM execution_entity WHERE status IN ('error', 'crashed', 'failed') AND datetime(startedAt) > datetime('now', '-1 day');"
+        recent_errors = self.run_db_query(sql_cmd, show_error_details=False)
+        
+        if recent_errors:
+            error_count = int(recent_errors)
+            if error_count == 0:
+                print(f"{Colors.BOLD}Recent Errors:{Colors.END} {Colors.GREEN}✓ 0{Colors.END}")
+            elif error_count < 10:
+                print(f"{Colors.BOLD}Recent Errors:{Colors.END} {Colors.YELLOW}⚠ {error_count}{Colors.END}")
+            else:
+                print(f"{Colors.BOLD}Recent Errors:{Colors.END} {Colors.RED}✗ {error_count} (Investigate!){Colors.END}")
+        
+        # Overall health summary
+        print(f"\n{Colors.BOLD}Overall Health:{Colors.END}")
+        if pod_status and phase == "Running" and restart_count < 5 and (not recent_errors or int(recent_errors) < 10):
+            print(f"{Colors.GREEN}✓ Healthy{Colors.END}")
+        elif pod_status and phase == "Running":
+            print(f"{Colors.YELLOW}⚠ Running with issues - review above{Colors.END}")
+        else:
+            print(f"{Colors.RED}✗ Unhealthy - needs attention{Colors.END}")
+        
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
     
     def database_troubleshooting(self):
         """Show database troubleshooting menu"""
@@ -231,7 +342,7 @@ class CloudMedicTool:
             print("  • Cancel pending executions (Option 7)")
         if waiting_count and int(waiting_count) > 0:
             print("  • Cancel waiting executions (Option 8)")
-        else:
+        if not (pending_count and int(pending_count) > 100):
             print("  • Check Grafana for memory issues")
         
         input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
@@ -268,29 +379,33 @@ class CloudMedicTool:
     def view_recent_errors(self):
         """View recent errors"""
         self.print_header("Recent Errors")
-    
+        
         limit = self.get_input("Number to show (default 10): ", required=False) or "10"
-    
+        
         self.print_info(f"Fetching last {limit} errors...")
-    
-        # Add headers to make it clear
+        
         print(f"\n{Colors.BOLD}Execution ID | Workflow ID | Workflow Name | Started At{Colors.END}")
         print("-" * 80)
-    
+        
         sql_cmd = f"SELECT e.id, e.workflowId, w.name, e.startedAt FROM execution_entity e LEFT JOIN workflow_entity w ON e.workflowId = w.id WHERE e.status IN ('error', 'crashed', 'failed') ORDER BY e.startedAt DESC LIMIT {limit};"
         db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
         self.run_command(db_cmd, capture_output=False)
-    
-        print()  # Add spacing
-    
+        
+        print()
+        
         if self.confirm("\nView error details for a specific execution?"):
             exec_id = self.get_input("Enter execution ID from the list above: ")
             self.print_info("Fetching error details...")
+            
             sql_cmd = f"SELECT data FROM execution_data WHERE executionId = '{exec_id}';"
-            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
-            print()
-            self.run_command(db_cmd, capture_output=False)
-    
+            result = self.run_db_query(sql_cmd)
+            
+            if result:
+                print(f"\n{Colors.BOLD}Error Details:{Colors.END}")
+                print(result)
+            elif result is None:
+                self.print_warning("Could not fetch error details")
+        
         input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
     
     def check_database_info(self):
@@ -627,10 +742,11 @@ class CloudMedicTool:
     
     def open_database_shell(self):
         """Open interactive database shell"""
-        self.print_header("Database Shell")
+        self.print_header("Database Shell (Advanced)")
         
         self.print_info("Opening SQLite shell...")
         self.print_warning("Type .quit to exit")
+        self.print_info("Tip: Use .tables to list tables, .schema <table> to view structure")
         print()
         
         db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite"
