@@ -67,8 +67,8 @@ cloudmedic  # if installed globally
 ### 2. Enter Workspace Details
 
 You'll be prompted for:
-- **Workspace name** (e.g., `jonwjames`, `guesty`)
-- **Cluster** (e.g., `prod-users-gwc-48`)
+- **Workspace name** (e.g., `jonwjames`)
+- **Cluster** (e.g., `prod-users-gwc-48`) -- only cluster number is required as of version 1.1
 
 The tool will automatically:
 - Switch to the specified cluster
