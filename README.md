@@ -4,12 +4,12 @@ A Python CLI tool that streamlines n8n Support Medic operations with an interact
 
 ## Features
 
-✅ Interactive menu-driven interface
-✅ Auto-discovery of pod names
-✅ Automatic downloads to ~/Downloads folder
-✅ Safety confirmations for destructive operations
-✅ Color-coded output for better readability
-✅ Database backup before modifications
+- Interactive menu-driven interface
+- Auto-discovery of pod names
+- Automatic downloads to ~/Downloads folder
+- Safety confirmations for destructive operations
+- Colour-coded output for better readability
+- Database backup before modifications
 
 ## Prerequisites
 
