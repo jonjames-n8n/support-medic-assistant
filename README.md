@@ -111,17 +111,17 @@ Available operations:
 ```
 $ cloudmedic
 
-Enter workspace name: guesty
+Enter workspace name: myn8nworkspace
 Enter cluster: prod-users-gwc-12
 ℹ Switching to cluster prod-users-gwc-12...
 ✓ Switched to cluster: prod-users-gwc-12
-ℹ Finding pod for workspace: guesty...
-✓ Found pod: guesty-n8n-6856cbbf6d-xk2wq
+ℹ Finding pod for workspace: myn8nworkspace...
+✓ Found pod: myn8nworkspace-n8n-6856cbbf6d-xk2wq
 
 Main Menu
-Workspace: guesty
+Workspace: myn8nworkspace
 Cluster: prod-users-gwc-12
-Pod: guesty-n8n-6856cbbf6d-xk2wq
+Pod: myn8nworkspace-n8n-6856cbbf6d-xk2wq
 
 1. Export workflows (from live instance)
 2. Export workflows (from backup)
@@ -130,8 +130,8 @@ Pod: guesty-n8n-6856cbbf6d-xk2wq
 Select an option: 1
 
 ℹ Exporting workflows...
-✓ Workflows exported to: /Users/jon/Downloads/guesty-workflows-2025-11-17.json.gz
-ℹ Extract with: gzip -d guesty-workflows-2025-11-17.json.gz
+✓ Workflows exported to: /Users/jon/Downloads/myn8nworkspace-workflows-2025-11-17.json.gz
+ℹ Extract with: gzip -d myn8nworkspace-workflows-2025-11-17.json.gz
 ```
 
 ### Example 2: Handle Crashloop (Deactivate Workflows)
