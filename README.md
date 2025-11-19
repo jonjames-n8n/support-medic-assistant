@@ -79,6 +79,9 @@ The tool will automatically:
 
 Available operations:
 
+**Health Check:**
+- `1` - Provides a quick glance status of Pod Health, DB Size, Number of Restarts etc
+
 **Workflow Management:**
 - `1` - Export workflows (from live instance) → Saves to Downloads as `.json.gz`
 - `2` - Export workflows (from backup) → Lists backups, lets you choose, saves as `.zip`
