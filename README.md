@@ -278,7 +278,7 @@ For issues or feature requests, contact Jon James
 
 ## Version
 
-Current version: 1.0
+Current version: 1.1
 Last updated: November 2025
 
 ---
