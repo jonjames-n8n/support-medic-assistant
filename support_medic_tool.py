@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.2
+Cloud Medic Assistant Tool v1.2.1
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.2.1:
+- Fixed: Export from backup now uses backup's date in filename instead of today's date
 
 Changelog v1.2:
 - Added execution status checker with year 3000 detection
@@ -121,7 +124,7 @@ class CloudMedicTool:
 
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup v1.2")
+        self.print_header("Cloud Medic Assistant - Setup v1.2.1")
 
         # VPN reminder
         self.print_warning("REMINDER: Make sure you're connected to the VPN!")
@@ -1325,8 +1328,25 @@ ORDER BY count DESC;
 
         # Download
         self.print_info("Downloading archive...")
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{self.workspace}-workflows-backup-{timestamp}.zip"
+
+        # Extract date from backup filename if provided
+        if backup_name:
+            # Parse backup filename: workspace_sqldump_YYYYMMDD_HHMM.tar
+            # Example: ericchen601_sqldump_20251117_1124.tar
+            import re
+            date_match = re.search(r'_(\d{8})_', backup_name)
+            if date_match:
+                backup_date = date_match.group(1)  # "20251117"
+                # Format as YYYY-MM-DD
+                formatted_date = f"{backup_date[0:4]}-{backup_date[4:6]}-{backup_date[6:8]}"
+            else:
+                # Fallback if parsing fails
+                formatted_date = datetime.now().strftime("%Y-%m-%d")
+        else:
+            # No backup name specified, using latest - today's date is appropriate
+            formatted_date = datetime.now().strftime("%Y-%m-%d")
+
+        filename = f"{self.workspace}-workflows-backup-{formatted_date}.zip"
         filepath = self.downloads_dir / filename
 
         download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"

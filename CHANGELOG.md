@@ -2,6 +2,16 @@
 
 All notable changes to the Support Medic Assistant Tool will be documented in this file.
 
+## v1.2.1 (2025-11-21) - Hotfix
+
+### Bug Fixes
+- **Export from backup**: Fixed filename to use backup's date instead of today's date
+  - Previously: Downloading backup from Nov 17 would save as `workspace-backup-2025-11-21.zip`
+  - Now: Correctly saves as `workspace-backup-2025-11-17.zip`
+  - Users can now accurately identify which backup they downloaded
+
+---
+
 ## v1.2 (2024-11-21)
 
 ### New Features
