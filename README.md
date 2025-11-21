@@ -11,12 +11,6 @@ All examples in this documentation use generic placeholder names:
 - Workflows: `Data Sync`, `Customer Onboarding`
 - Emails: `user@example.com`
 
-When creating support tickets or documentation:
-- Use generic examples
-- Never include real customer workspace names
-- Never include real workflow names
-- Never include real execution data
-
 ## Features
 
 - Interactive menu-driven interface
@@ -400,7 +394,7 @@ def my_custom_function(self):
 
 For issues or feature requests:
 - GitHub Issues: https://github.com/jonjames-n8n/support-medic-assistant/issues
-- Internal Support: #cloud-support
+- Internal Support: Jon James
 
 ## Version
 
