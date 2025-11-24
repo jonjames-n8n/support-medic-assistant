@@ -24,7 +24,25 @@ All examples in this documentation use generic placeholder names:
 - **v1.2:** Disable 2FA for users
 - **v1.2:** Change owner email
 
-## Prerequisites
+## 🖥️ Platform-Specific Versions
+
+This tool is available in two versions optimized for different operating systems:
+
+### 🐧 Linux/Mac Users
+- **Use**: `support_medic_tool.py`
+- **Installer**: `./install.sh`
+- **Documentation**: This README
+
+### 🪟 Windows Users
+- **Use**: `support_medic_tool_windows.py`
+- **Installer**: `.\install.ps1` (PowerShell)
+- **Documentation**: [README_WINDOWS.md](README_WINDOWS.md) ← **Start here!**
+
+**Both versions have identical features** - choose based on your operating system.
+
+---
+
+## Prerequisites (Linux/Mac)
 
 - Python 3.6 or higher
 - `kubectl` installed and configured
@@ -32,7 +50,20 @@ All examples in this documentation use generic placeholder names:
 - Access to n8n Cloud clusters
 - VPN connection active
 
-## Installation
+## Installation (Linux/Mac)
+
+> **Windows Users**: Use `install.ps1` instead - see [README_WINDOWS.md](README_WINDOWS.md)
+
+### Quick Install (Recommended)
+
+```bash
+./install.sh
+```
+
+The installer will:
+- Check for Python 3, kubectl, and kubectx
+- Let you choose: global install, alias, or manual run
+- Set up the `cloudmedic` command
 
 ### Option 1: Direct Run (No Installation)
 
