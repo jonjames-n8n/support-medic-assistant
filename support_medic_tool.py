@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.2.1
+Cloud Medic Assistant Tool v1.2.2
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.2.2:
+- Fixed: Graceful error handling when changing workspace/cluster and pod not found
 
 Changelog v1.2.1:
 - Fixed: Export from backup now uses backup's date in filename instead of today's date
@@ -122,9 +125,15 @@ class CloudMedicTool:
         response = input(f"{Colors.YELLOW}{message} (y/n): {Colors.END}").strip().lower()
         return response in ['y', 'yes']
 
+    def find_pod(self):
+        """Find pod name for current workspace"""
+        pod_cmd = f"kubectl get pods -n {self.workspace} -o jsonpath='{{.items[0].metadata.name}}'"
+        pod_name = self.run_command(pod_cmd)
+        return pod_name if pod_name else None
+
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup v1.2.1")
+        self.print_header("Cloud Medic Assistant - Setup v1.2.2")
 
         # VPN reminder
         self.print_warning("REMINDER: Make sure you're connected to the VPN!")
@@ -148,8 +157,7 @@ class CloudMedicTool:
 
         # Get pod name
         self.print_info(f"Finding pod for workspace: {self.workspace}...")
-        pod_cmd = f"kubectl get pods -n {self.workspace} -o jsonpath='{{.items[0].metadata.name}}'"
-        self.pod_name = self.run_command(pod_cmd)
+        self.pod_name = self.find_pod()
 
         if self.pod_name:
             self.print_success(f"Found pod: {self.pod_name}")
@@ -157,6 +165,115 @@ class CloudMedicTool:
         else:
             self.print_error("Could not find pod. Please verify workspace name.")
             return False
+
+    def change_workspace_cluster(self):
+        """Change to a different workspace/cluster with proper error handling"""
+        self.print_header("Change Workspace/Cluster")
+
+        # Store current state for potential rollback
+        old_workspace = self.workspace
+        old_cluster = self.cluster
+        old_cluster_number = self.cluster_number
+        old_pod = self.pod_name
+
+        # Get new workspace
+        new_workspace = self.get_input("Enter workspace name: ")
+        cluster_num = self.get_input("Enter cluster number (e.g., 48 for prod-users-gwc-48): ")
+        new_cluster = f"prod-users-gwc-{cluster_num}"
+
+        # Switch cluster
+        self.print_info(f"Switching to cluster {new_cluster}...")
+        result = self.run_command(f"kubectx {new_cluster}", capture_output=True)
+
+        if result is None:
+            self.print_error(f"Failed to switch to cluster {new_cluster}")
+            self.print_warning("Staying on current workspace")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        self.print_success(f"Switched to cluster: {new_cluster}")
+
+        # Temporarily update state for pod search
+        self.workspace = new_workspace
+        self.cluster = new_cluster
+        self.cluster_number = cluster_num
+
+        # Find pod
+        self.print_info(f"Finding pod for workspace: {new_workspace}...")
+        new_pod = self.find_pod()
+
+        # Handle pod not found gracefully
+        if not new_pod:
+            self.print_error(f"Could not find pod for workspace: {new_workspace}")
+            print()
+            print(f"{Colors.YELLOW}Possible reasons:{Colors.END}")
+            print("  • Workspace name is incorrect")
+            print("  • Workspace doesn't exist in this cluster")
+            print("  • Instance is not deployed")
+            print()
+            print(f"{Colors.BOLD}Options:{Colors.END}")
+            print("1. Try different workspace/cluster")
+            print("2. Revert to previous workspace")
+            print("3. Continue anyway (limited operations)")
+            print()
+
+            choice = self.get_input("Select option (1/2/3): ")
+
+            if choice == "1":
+                # Rollback state first
+                self.workspace = old_workspace
+                self.cluster = old_cluster
+                self.cluster_number = old_cluster_number
+                self.pod_name = old_pod
+                self.run_command(f"kubectx {old_cluster}", capture_output=True)
+
+                # Recursively call to try again
+                self.change_workspace_cluster()
+                return
+
+            elif choice == "2":
+                # Rollback to previous workspace
+                self.print_info(f"Reverting to {old_workspace} in {old_cluster}...")
+                self.workspace = old_workspace
+                self.cluster = old_cluster
+                self.cluster_number = old_cluster_number
+                self.pod_name = old_pod
+                self.run_command(f"kubectx {old_cluster}", capture_output=True)
+                self.print_success("Reverted to previous workspace")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                return
+
+            elif choice == "3":
+                # Continue with no pod (limited operations)
+                self.print_warning("Continuing with limited operations")
+                self.pod_name = None
+                print()
+                print(f"{Colors.BOLD}Available operations:{Colors.END}")
+                print("  • Export from backup (Option 2)")
+                print("  • Change workspace/cluster (Option 13)")
+                print()
+                print(f"{Colors.YELLOW}⚠ All other operations require a valid pod{Colors.END}")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                return
+
+            else:
+                # Invalid choice, rollback to be safe
+                self.print_info("Invalid choice. Reverting to previous workspace...")
+                self.workspace = old_workspace
+                self.cluster = old_cluster
+                self.cluster_number = old_cluster_number
+                self.pod_name = old_pod
+                self.run_command(f"kubectx {old_cluster}", capture_output=True)
+                self.print_success("Reverted to previous workspace")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                return
+
+        # Success - pod found
+        self.pod_name = new_pod
+        self.print_success(f"Found pod: {new_pod}")
+        self.print_success(f"Successfully switched to workspace: {new_workspace}")
+
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def show_main_menu(self):
         """Display main menu and get user choice"""
@@ -179,7 +296,7 @@ class CloudMedicTool:
             ("10", "View recent logs", self.view_logs),
             ("11", "Database troubleshooting (guided)", self.database_troubleshooting),
             ("12", "Redeploy instance (cloudbot)", self.redeploy_instance),
-            ("13", "Change workspace/cluster", self.setup_workspace),
+            ("13", "Change workspace/cluster", self.change_workspace_cluster),
             ("14", "Download logs", self.download_logs),
             ("15", "Disable 2FA", self.disable_2fa),
             ("16", "Change owner email", self.change_owner_email),
@@ -1332,7 +1449,7 @@ ORDER BY count DESC;
         # Extract date from backup filename if provided
         if backup_name:
             # Parse backup filename: workspace_sqldump_YYYYMMDD_HHMM.tar
-            # Example: ericchen601_sqldump_20251117_1124.tar
+            # Example: workspace123_sqldump_20251117_1124.tar
             import re
             date_match = re.search(r'_(\d{8})_', backup_name)
             if date_match:
