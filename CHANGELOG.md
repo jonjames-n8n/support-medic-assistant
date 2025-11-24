@@ -2,6 +2,26 @@
 
 All notable changes to the Support Medic Assistant Tool will be documented in this file.
 
+## v1.2.2 (2025-11-24) - Hotfix
+
+### Bug Fixes
+- **Change workspace/cluster**: Fixed graceful error handling when pod not found
+  - Previously: Tool entered broken state with `Pod: None`, all operations failed
+  - Now: Offers recovery options:
+    - Try different workspace/cluster
+    - Revert to previous working workspace
+    - Continue with limited operations (backup export only)
+  - Added state rollback to preserve working configuration
+  - Added helpful error messages explaining why pod might not be found
+
+### Improvements
+- Better user experience when switching to invalid/non-existent workspaces
+- Prevents tool from entering unusable state
+- Clear guidance on available operations without a pod
+- New `find_pod()` helper method for cleaner code
+
+---
+
 ## v1.2.1 (2025-11-21) - Hotfix
 
 ### Bug Fixes
