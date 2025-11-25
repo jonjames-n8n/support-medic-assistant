@@ -1873,6 +1873,39 @@ ORDER BY count DESC;
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
 
+        # First, list backups to get the latest backup name and date
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_result = self.run_command(list_cmd, capture_output=True, check=False)
+
+        if list_result is None or "Error" in str(list_result):
+            self.print_error(f"No backups found for '{self.workspace}'.")
+            self.print_info("Backups are retained for 90 days after deletion.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Parse the latest backup name from list output
+        # The list output contains backup filenames, one per line
+        # Format: {instance}_sqldump_{YYYYMMDD}_{HHMM}.tar
+        backup_lines = [line.strip() for line in list_result.strip().split('\n') if line.strip() and '_sqldump_' in line]
+
+        if not backup_lines:
+            self.print_error(f"No backups found for '{self.workspace}'.")
+            self.print_info("Backups are retained for 90 days after deletion.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # The latest backup is typically the last one in the list (most recent)
+        latest_backup = backup_lines[-1]
+
+        # Extract date from backup filename
+        import re
+        date_match = re.search(r'_sqldump_(\d{8})_', latest_backup)
+        if date_match:
+            backup_date = date_match.group(1)  # e.g., "20251113"
+        else:
+            # Fallback to today's date if parsing fails
+            backup_date = datetime.now().strftime("%Y%m%d")
+
         # Export from latest backup
         self.print_info(f"Exporting workflows from latest backup...")
         export_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} export"
@@ -1884,10 +1917,9 @@ ORDER BY count DESC;
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
 
-        # Download the zip file
+        # Download the zip file with backup date
         self.print_info("Downloading workflows...")
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{self.workspace}-workflows-deleted-{timestamp}.zip"
+        filename = f"{self.workspace}-workflows-backup-{backup_date}.zip"
         filepath = self.downloads_dir / filename
 
         download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"
@@ -1949,15 +1981,16 @@ ORDER BY count DESC;
         self.print_info("Downloading workflows...")
 
         # Extract date from backup filename
+        # Format: {instance}_sqldump_{YYYYMMDD}_{HHMM}.tar
         import re
-        date_match = re.search(r'_(\d{8})_', backup_name)
+        date_match = re.search(r'_sqldump_(\d{8})_', backup_name)
         if date_match:
-            backup_date = date_match.group(1)
-            formatted_date = f"{backup_date[0:4]}-{backup_date[4:6]}-{backup_date[6:8]}"
+            backup_date = date_match.group(1)  # e.g., "20251113"
         else:
-            formatted_date = datetime.now().strftime("%Y-%m-%d")
+            # Fallback if parsing fails
+            backup_date = datetime.now().strftime("%Y%m%d")
 
-        filename = f"{self.workspace}-workflows-deleted-{formatted_date}.zip"
+        filename = f"{self.workspace}-workflows-backup-{backup_date}.zip"
         filepath = self.downloads_dir / filename
 
         download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"
