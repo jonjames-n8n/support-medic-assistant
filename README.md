@@ -19,6 +19,9 @@ All examples in this documentation use generic placeholder names:
 - Safety confirmations for destructive operations
 - Colour-coded output for better readability
 - Database backup before modifications
+- **v1.3:** Pre-menu for operation mode selection
+- **v1.3:** Deleted instance recovery (list/export workflows from backups)
+- **v1.3:** Improved error handling when pod not available
 - **v1.2:** Execution status checker with year 3000 detection
 - **v1.2:** Log download menu (n8n, backup, k8s, execution, bundle)
 - **v1.2:** Disable 2FA for users
@@ -108,9 +111,23 @@ python3 support_medic_tool.py
 cloudmedic  # if installed globally
 ```
 
-### 2. Enter Workspace Details
+### 2. Select Operation Mode (v1.3)
 
-You'll be prompted for:
+You'll first see a pre-menu to choose your operation mode:
+
+**Option 1: Full medic operations (live instance)**
+- For live instances with active pods
+- Requires workspace name and cluster number
+- Full access to all medic operations
+
+**Option 2: Recover workflows from deleted instance**
+- For deleted instances (backups only)
+- Only requires instance name
+- Access to backup listing and workflow export
+
+### 3. Enter Required Details
+
+**For Live Instances (Option 1):**
 - **Workspace name** (e.g., `myworkspace`)
 - **Cluster number** (e.g., `48` for prod-users-gwc-48)
 
@@ -119,7 +136,12 @@ The tool will automatically:
 - Find the pod for that workspace
 - Display the main menu
 
-### 3. Select an Operation
+**For Deleted Instances (Option 2):**
+- **Instance name** (e.g., `deleted-workspace`)
+- No cluster needed (uses services-gwc-1 for backups)
+- Displays deleted instance recovery menu
+
+### 4. Select an Operation
 
 Available operations:
 
@@ -155,7 +177,50 @@ Available operations:
 
 ## Examples
 
-### Example 1: Export Workflows for Customer
+### Example 1: Recover Workflows from Deleted Instance (v1.3)
+
+```
+$ cloudmedic
+
+╔══════════════════════════════════════════════════════════════╗
+║              SUPPORT MEDIC ASSISTANT v1.3                    ║
+╚══════════════════════════════════════════════════════════════╝
+
+Select operation mode:
+
+1. Full medic operations (live instance)
+2. Recover workflows from deleted instance
+
+Select option: 2
+
+==============================================================
+      Deleted Instance Recovery - Setup
+==============================================================
+
+⚠ REMINDER: Make sure you're connected to the VPN!
+
+Enter instance name: deleted-workspace
+
+==============================================================
+           Deleted Instance Recovery
+==============================================================
+Instance: deleted-workspace
+
+1. List available backups
+2. Export workflows (latest backup)
+3. Export workflows (select backup)
+4. Back to start
+
+Select option: 2
+
+ℹ Connecting to backup service...
+ℹ Exporting workflows from latest backup...
+ℹ Downloading workflows...
+✓ Workflows exported to: /Users/you/Downloads/deleted-workspace-workflows-backup-20251113.zip
+ℹ File size: 245.3 KB
+```
+
+### Example 2: Export Workflows for Customer
 
 ```
 $ cloudmedic
@@ -183,7 +248,7 @@ Select an option: 1
 ℹ Extract with: gzip -d myworkspace-workflows-2025-11-21.json.gz
 ```
 
-### Example 2: Handle Crashloop (Deactivate Workflows)
+### Example 3: Handle Crashloop (Deactivate Workflows)
 
 ```
 Select an option: 4
@@ -197,7 +262,7 @@ Are you sure? (y/n): y
 ⚠ Redeploy instance for changes to take effect
 ```
 
-### Example 3: Investigate Failed Execution
+### Example 4: Investigate Failed Execution
 
 ```
 Select an option: 6
@@ -214,7 +279,7 @@ View execution data (error details)? (y/n): y
 [Shows full error JSON with details]
 ```
 
-### Example 4: Download Logs Bundle (v1.2)
+### Example 5: Download Logs Bundle (v1.2)
 
 ```
 Select an option: 14
@@ -240,7 +305,7 @@ Select option: 5
 ℹ Location: /Users/you/Downloads/myworkspace-logs-bundle-2025-11-21-143022.tar.gz
 ```
 
-### Example 5: Disable 2FA (v1.2)
+### Example 6: Disable 2FA (v1.2)
 
 ```
 Select an option: 15
@@ -262,7 +327,7 @@ Run this command in Slack to notify the user:
   /cloudbot notify [user_id] disable-2fa [thread_id]
 ```
 
-### Example 6: Change Owner Email (v1.2)
+### Example 7: Change Owner Email (v1.2)
 
 ```
 Select an option: 16
@@ -429,5 +494,17 @@ For issues or feature requests:
 
 ## Version
 
-Current version: 1.2
+Current version: 1.3
 Last updated: November 2025
+
+### What's New in v1.3
+
+- **Pre-menu for Operation Mode**: Choose between full medic operations or deleted instance recovery at startup
+- **Deleted Instance Recovery**: Recover workflows from deleted instances using backups
+  - List available backups (retained for 90 days)
+  - Export workflows from latest backup
+  - Export workflows from specific backup
+- **Improved Error Handling**: Better handling when pod is not available
+  - Clear error messages when attempting pod-required operations
+  - Suggestions for available operations without pod
+- **Enhanced Export Validation**: Export operations now properly validate success/failure
