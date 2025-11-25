@@ -1886,6 +1886,7 @@ ORDER BY count DESC;
         # Parse the latest backup name from list output
         # The list output contains backup filenames, one per line
         # Format: {instance}_sqldump_{YYYYMMDD}_{HHMM}.tar
+        # Note: workflow-exporter returns backups sorted newest-first
         backup_lines = [line.strip() for line in list_result.strip().split('\n') if line.strip() and '_sqldump_' in line]
 
         if not backup_lines:
@@ -1894,8 +1895,8 @@ ORDER BY count DESC;
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
 
-        # The latest backup is typically the last one in the list (most recent)
-        latest_backup = backup_lines[-1]
+        # The list is sorted newest-first, so first item = latest backup
+        latest_backup = backup_lines[0]
 
         # Extract date from backup filename
         import re
