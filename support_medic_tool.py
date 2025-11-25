@@ -1465,15 +1465,44 @@ ORDER BY count DESC;
         self.print_info("Switching to services-gwc-1...")
         self.run_command("kubectx services-gwc-1")
 
-        # List backups
+        # List backups - capture output to check for errors and get latest
         self.print_info("Listing available backups...")
         list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_result = self.run_command(list_cmd, capture_output=True, check=False)
+
+        # Fix 2: Check for errors in list command
+        if list_result is None or "ERROR" in str(list_result) or "ContainerNotFound" in str(list_result):
+            self.print_error(f"No backups found for '{self.workspace}'")
+            self.print_info("Backups are retained for 90 days after deletion.")
+            # Switch back to original cluster
+            self.run_command(f"kubectx {self.cluster}")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Parse backup list
+        import re
+        backup_lines = [line.strip() for line in list_result.strip().split('\n') if line.strip() and '_sqldump_' in line]
+
+        # Fix 2: Check if backup list is empty
+        if not backup_lines:
+            self.print_error(f"No backups found for '{self.workspace}'")
+            self.print_info("Backups are retained for 90 days after deletion.")
+            # Switch back to original cluster
+            self.run_command(f"kubectx {self.cluster}")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Display the list to user
         print()
-        self.run_command(list_cmd, capture_output=False)
+        print(list_result)
         print()
 
         # Ask which backup to use
         backup_name = self.get_input("Enter backup name (or press Enter for latest): ", required=False)
+
+        # Fix 1: If no backup name provided, use latest (first in list)
+        if not backup_name:
+            backup_name = backup_lines[0]  # First item = newest backup
 
         # Export
         self.print_info("Exporting workflows...")
@@ -1487,33 +1516,29 @@ ORDER BY count DESC;
         # Download
         self.print_info("Downloading archive...")
 
-        # Extract date from backup filename if provided
-        if backup_name:
-            # Parse backup filename: workspace_sqldump_YYYYMMDD_HHMM.tar
-            # Example: workspace123_sqldump_20251117_1124.tar
-            import re
-            date_match = re.search(r'_(\d{8})_', backup_name)
-            if date_match:
-                backup_date = date_match.group(1)  # "20251117"
-                # Format as YYYY-MM-DD
-                formatted_date = f"{backup_date[0:4]}-{backup_date[4:6]}-{backup_date[6:8]}"
-            else:
-                # Fallback if parsing fails
-                formatted_date = datetime.now().strftime("%Y-%m-%d")
+        # Fix 1: Parse date from backup name (works for both user-selected and latest)
+        date_match = re.search(r'_sqldump_(\d{8})_', backup_name)
+        if date_match:
+            backup_date = date_match.group(1)  # e.g., "20251124"
         else:
-            # No backup name specified, using latest - today's date is appropriate
-            formatted_date = datetime.now().strftime("%Y-%m-%d")
+            # Fallback if parsing fails
+            backup_date = datetime.now().strftime("%Y%m%d")
 
-        filename = f"{self.workspace}-workflows-backup-{formatted_date}.zip"
+        filename = f"{self.workspace}-workflows-backup-{backup_date}.zip"
         filepath = self.downloads_dir / filename
 
         download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"
         result = self.run_command(download_cmd, capture_output=False)
 
-        if filepath.exists():
+        # Fix 3: Validate download wasn't empty
+        if filepath.exists() and filepath.stat().st_size > 0:
+            file_size = filepath.stat().st_size / 1024
             self.print_success(f"Workflows downloaded to: {filepath}")
+            self.print_info(f"File size: {file_size:.1f} KB")
         else:
             self.print_error("Download failed")
+            if filepath.exists():
+                filepath.unlink()  # Clean up empty file
 
         # Switch back to original cluster
         self.run_command(f"kubectx {self.cluster}")
@@ -1852,7 +1877,8 @@ ORDER BY count DESC;
         list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
         result = self.run_command(list_cmd, capture_output=True, check=False)
 
-        if result is None or "Error" in str(result):
+        # Check for errors or empty result
+        if result is None or "ERROR" in str(result) or "Error" in str(result) or "ContainerNotFound" in str(result):
             self.print_error(f"No backups found for '{self.workspace}'. Backups are retained for 90 days after deletion.")
         else:
             print(result)
@@ -1877,7 +1903,8 @@ ORDER BY count DESC;
         list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
         list_result = self.run_command(list_cmd, capture_output=True, check=False)
 
-        if list_result is None or "Error" in str(list_result):
+        # Check for errors in list command
+        if list_result is None or "ERROR" in str(list_result) or "Error" in str(list_result) or "ContainerNotFound" in str(list_result):
             self.print_error(f"No backups found for '{self.workspace}'.")
             self.print_info("Backups are retained for 90 days after deletion.")
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
@@ -1912,7 +1939,8 @@ ORDER BY count DESC;
         export_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} export"
         export_result = self.run_command(export_cmd, capture_output=True, check=False)
 
-        if export_result is None or "Error" in str(export_result):
+        # Check for errors in export command
+        if export_result is None or "ERROR" in str(export_result) or "Error" in str(export_result):
             self.print_error(f"Export failed. No backups found for '{self.workspace}'.")
             self.print_info("Backups are retained for 90 days after deletion.")
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
@@ -1957,7 +1985,8 @@ ORDER BY count DESC;
         list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
         list_result = self.run_command(list_cmd, capture_output=True, check=False)
 
-        if list_result is None or "Error" in str(list_result):
+        # Check for errors in list command
+        if list_result is None or "ERROR" in str(list_result) or "Error" in str(list_result) or "ContainerNotFound" in str(list_result):
             self.print_error(f"No backups found for '{self.workspace}'. Backups are retained for 90 days after deletion.")
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
@@ -1973,7 +2002,8 @@ ORDER BY count DESC;
         export_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} export {backup_name}"
         export_result = self.run_command(export_cmd, capture_output=True, check=False)
 
-        if export_result is None or "Error" in str(export_result):
+        # Check for errors in export command
+        if export_result is None or "ERROR" in str(export_result) or "Error" in str(export_result):
             self.print_error(f"Export failed. Check backup name.")
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
