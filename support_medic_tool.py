@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.2.2
+Cloud Medic Assistant Tool v1.3
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.3:
+- Added pre-menu for operation mode selection
+- Added deleted instance recovery menu (list/export workflows from backups)
+- Fixed: Block pod-required operations when Pod: None
+- Fixed: Export workflows now properly validates success/failure
 
 Changelog v1.2.2:
 - Fixed: Graceful error handling when changing workspace/cluster and pod not found
@@ -50,6 +56,7 @@ class CloudMedicTool:
         self.cluster_number = None
         self.pod_name = None
         self.downloads_dir = Path.home() / "Downloads"
+        self.deleted_instance_mode = False  # New flag for deleted instance recovery mode
 
     def print_header(self, text):
         """Print a formatted header"""
@@ -133,7 +140,7 @@ class CloudMedicTool:
 
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup v1.2.2")
+        self.print_header("Cloud Medic Assistant - Setup v1.3")
 
         # VPN reminder
         self.print_warning("REMINDER: Make sure you're connected to the VPN!")
@@ -308,6 +315,21 @@ class CloudMedicTool:
 
         print()
         choice = self.get_input("Select an option: ", required=False)
+
+        # Pod-required operation check (Bug Fix #1)
+        pod_not_required = ['2', '13']  # Export from backup, change workspace
+
+        if choice not in pod_not_required and choice != 'q' and not self.pod_name:
+            self.print_error("This operation requires a valid pod")
+            print()
+            print(f"{Colors.BOLD}Pod is not available for workspace: {self.workspace}{Colors.END}")
+            print()
+            print(f"{Colors.BOLD}Available options without pod:{Colors.END}")
+            print("  • Option 2: Export from backup")
+            print("  • Option 13: Change workspace/cluster")
+            print("  • Option q: Quit")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return True
 
         # Find and execute the selected option
         for key, _, func in menu_options:
@@ -1400,19 +1422,38 @@ ORDER BY count DESC;
         """Export workflows from live instance"""
         self.print_header("Export Workflows (Live Instance)")
 
+        # Bug Fix #2: Check if pod is available
+        if not self.pod_name:
+            self.print_error("No pod available. Cannot export from live instance.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
         timestamp = datetime.now().strftime("%Y-%m-%d")
         filename = f"{self.workspace}-workflows-{timestamp}.json.gz"
         filepath = self.downloads_dir / filename
 
         self.print_info("Exporting workflows...")
-        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c n8n -- n8n export:workflow --pretty --all | gzip > {filepath}"
+        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c n8n -- n8n export:workflow --pretty --all 2>&1 | gzip > {filepath}"
 
-        result = self.run_command(cmd, capture_output=False)
-        if result is not None or filepath.exists():
-            self.print_success(f"Workflows exported to: {filepath}")
-            self.print_info(f"Extract with: gzip -d {filename}")
+        result = self.run_command(cmd, capture_output=False, check=False)
+
+        # Bug Fix #2: Validate result
+        if filepath.exists() and filepath.stat().st_size > 0:
+            # Check if the file contains error messages
+            check_cmd = f"gzip -cd {filepath} 2>&1 | head -n 5"
+            result_output = self.run_command(check_cmd, capture_output=True, check=False)
+
+            if result_output and "Error from server" not in result_output and "error" not in result_output.lower():
+                self.print_success(f"Workflows exported to: {filepath}")
+                self.print_info(f"Extract with: gzip -d {filename}")
+            else:
+                self.print_error("Export failed - namespace not found or pod not accessible")
+                if filepath.exists():
+                    filepath.unlink()
         else:
             self.print_error("Export failed")
+            if filepath.exists():
+                filepath.unlink()
 
         input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
@@ -1727,16 +1768,246 @@ ORDER BY count DESC;
 
         input(f"{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
+    # ============================================================
+    # Feature: Pre-Menu and Deleted Instance Recovery
+    # ============================================================
+
+    def show_pre_menu(self):
+        """Show pre-menu for operation mode selection"""
+        print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.3':^60}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}\n")
+
+        print(f"{Colors.BOLD}Select operation mode:{Colors.END}\n")
+        print(f"{Colors.GREEN}1.{Colors.END} Full medic operations (live instance)")
+        print(f"{Colors.GREEN}2.{Colors.END} Recover workflows from deleted instance")
+        print()
+
+        choice = self.get_input("Select option: ")
+        return choice
+
+    def setup_deleted_instance(self):
+        """Setup for deleted instance recovery mode"""
+        self.print_header("Deleted Instance Recovery - Setup")
+
+        # VPN reminder
+        self.print_warning("REMINDER: Make sure you're connected to the VPN!")
+        print()
+
+        # Get instance name only (no cluster needed)
+        self.workspace = self.get_input("Enter instance name: ")
+        self.deleted_instance_mode = True
+        self.pod_name = None  # No pod for deleted instances
+        self.cluster = None
+        self.cluster_number = None
+
+        return True
+
+    def show_deleted_instance_menu(self):
+        """Show deleted instance recovery menu"""
+        while True:
+            self.print_header("Deleted Instance Recovery")
+            print(f"{Colors.BOLD}Instance:{Colors.END} {self.workspace}\n")
+
+            menu_options = [
+                ("1", "List available backups", self.list_deleted_instance_backups),
+                ("2", "Export workflows (latest backup)", self.export_deleted_instance_latest),
+                ("3", "Export workflows (select backup)", self.export_deleted_instance_specific),
+                ("4", "Back to start", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select option: ", required=False)
+
+            if choice == '4':
+                return False  # Go back to pre-menu
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key:
+                    if func:
+                        func()
+                    break
+
+    def list_deleted_instance_backups(self):
+        """List available backups for deleted instance"""
+        self.print_header("Available Backups")
+
+        # Switch to services cluster
+        self.print_info("Connecting to backup service...")
+        switch_result = self.run_command("kubectx services-gwc-1", capture_output=True)
+
+        if switch_result is None:
+            self.print_error("Cannot connect to services-gwc-1. Check VPN and cluster access.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # List backups
+        self.print_info(f"Listing backups for '{self.workspace}'...")
+        print()
+
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        result = self.run_command(list_cmd, capture_output=True, check=False)
+
+        if result is None or "Error" in str(result):
+            self.print_error(f"No backups found for '{self.workspace}'. Backups are retained for 90 days after deletion.")
+        else:
+            print(result)
+            self.print_info("Backups are retained for 90 days after deletion.")
+
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def export_deleted_instance_latest(self):
+        """Export workflows from latest backup of deleted instance"""
+        self.print_header("Export Workflows (Latest Backup)")
+
+        # Switch to services cluster
+        self.print_info("Connecting to backup service...")
+        switch_result = self.run_command("kubectx services-gwc-1", capture_output=True)
+
+        if switch_result is None:
+            self.print_error("Cannot connect to services-gwc-1. Check VPN and cluster access.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Export from latest backup
+        self.print_info(f"Exporting workflows from latest backup...")
+        export_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} export"
+        export_result = self.run_command(export_cmd, capture_output=True, check=False)
+
+        if export_result is None or "Error" in str(export_result):
+            self.print_error(f"Export failed. No backups found for '{self.workspace}'.")
+            self.print_info("Backups are retained for 90 days after deletion.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Download the zip file
+        self.print_info("Downloading workflows...")
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{self.workspace}-workflows-deleted-{timestamp}.zip"
+        filepath = self.downloads_dir / filename
+
+        download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"
+        download_result = self.run_command(download_cmd, capture_output=False, check=False)
+
+        if filepath.exists() and filepath.stat().st_size > 0:
+            file_size = filepath.stat().st_size / 1024
+            self.print_success(f"Workflows exported to: {filepath}")
+            self.print_info(f"File size: {file_size:.1f} KB")
+        else:
+            self.print_error("Download failed")
+            if filepath.exists():
+                filepath.unlink()
+
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def export_deleted_instance_specific(self):
+        """Export workflows from specific backup of deleted instance"""
+        self.print_header("Export Workflows (Select Backup)")
+
+        # Switch to services cluster
+        self.print_info("Connecting to backup service...")
+        switch_result = self.run_command("kubectx services-gwc-1", capture_output=True)
+
+        if switch_result is None:
+            self.print_error("Cannot connect to services-gwc-1. Check VPN and cluster access.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # List backups first
+        self.print_info(f"Available backups for '{self.workspace}':")
+        print()
+
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_result = self.run_command(list_cmd, capture_output=True, check=False)
+
+        if list_result is None or "Error" in str(list_result):
+            self.print_error(f"No backups found for '{self.workspace}'. Backups are retained for 90 days after deletion.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        print(list_result)
+        print()
+
+        # Get backup name
+        backup_name = self.get_input("Enter backup name: ")
+
+        # Export from specific backup
+        self.print_info(f"Exporting workflows from backup '{backup_name}'...")
+        export_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} export {backup_name}"
+        export_result = self.run_command(export_cmd, capture_output=True, check=False)
+
+        if export_result is None or "Error" in str(export_result):
+            self.print_error(f"Export failed. Check backup name.")
+            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+            return
+
+        # Download the zip file
+        self.print_info("Downloading workflows...")
+
+        # Extract date from backup filename
+        import re
+        date_match = re.search(r'_(\d{8})_', backup_name)
+        if date_match:
+            backup_date = date_match.group(1)
+            formatted_date = f"{backup_date[0:4]}-{backup_date[4:6]}-{backup_date[6:8]}"
+        else:
+            formatted_date = datetime.now().strftime("%Y-%m-%d")
+
+        filename = f"{self.workspace}-workflows-deleted-{formatted_date}.zip"
+        filepath = self.downloads_dir / filename
+
+        download_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- cat /tmp/output/{self.workspace}-workflows.zip > {filepath}"
+        download_result = self.run_command(download_cmd, capture_output=False, check=False)
+
+        if filepath.exists() and filepath.stat().st_size > 0:
+            file_size = filepath.stat().st_size / 1024
+            self.print_success(f"Workflows exported to: {filepath}")
+            self.print_info(f"File size: {file_size:.1f} KB")
+        else:
+            self.print_error("Download failed")
+            if filepath.exists():
+                filepath.unlink()
+
+        input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
     def run(self):
         """Main application loop"""
         try:
-            # Setup
-            if not self.setup_workspace():
-                return
-
-            # Main loop
             while True:
-                if not self.show_main_menu():
+                # Show pre-menu
+                choice = self.show_pre_menu()
+
+                if choice == '1':
+                    # Full medic operations (existing flow)
+                    if not self.setup_workspace():
+                        continue
+
+                    # Main loop
+                    while True:
+                        if not self.show_main_menu():
+                            break
+
+                elif choice == '2':
+                    # Deleted instance recovery
+                    if not self.setup_deleted_instance():
+                        continue
+
+                    # Deleted instance menu loop
+                    if self.show_deleted_instance_menu() == False:
+                        # User chose to go back
+                        self.deleted_instance_mode = False
+                        continue
+
+                else:
+                    self.print_error("Invalid option. Please select 1 or 2.")
+                    continue
+
+                # Ask if user wants to continue or quit
+                if not self.confirm("\nPerform another operation?"):
                     break
 
             self.print_header("Goodbye!")
