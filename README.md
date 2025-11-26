@@ -2,14 +2,6 @@
 
 A Python CLI tool that streamlines n8n Support Medic operations with an interactive menu system.
 
-## Privacy & Security Notice
-
-**IMPORTANT:** Never share real customer data in public documentation or screenshots.
-
-All examples in this documentation use generic placeholder names:
-- Workspaces: `myworkspace`, `customer-workspace`
-- Workflows: `Data Sync`, `Customer Onboarding`
-- Emails: `user@example.com`
 
 ## Features
 
