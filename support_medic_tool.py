@@ -723,10 +723,9 @@ class CloudMedicTool:
 
         # Database size
         self.print_info("\nChecking database size...")
-        size_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
-        db_size = self.run_command(size_cmd)
-        if db_size:
-            print(f"{Colors.BOLD}Database Size:{Colors.END} {db_size}")
+        db_size_bytes = self.get_database_size()
+        if db_size_bytes:
+            print(f"{Colors.BOLD}Database Size:{Colors.END} {self.format_bytes(db_size_bytes)}")
 
         # Active workflows count
         sql_cmd = "SELECT COUNT(*) FROM workflow_entity WHERE active = 1;"
@@ -772,7 +771,7 @@ class CloudMedicTool:
 
         # 1. Disk Usage
         self.print_section_header("1. DISK USAGE")
-        disk_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c n8n -- df -h /home/node/.n8n 2>/dev/null"
+        disk_cmd = f"kubectl exec {self.pod_name} -n {self.workspace} -c backup-cron -- df -h /data 2>/dev/null"
         disk_usage = self.run_command(disk_cmd)
         if disk_usage:
             print(disk_usage)
@@ -790,11 +789,10 @@ class CloudMedicTool:
             if table_sizes:
                 print(f"\n{Colors.BOLD}Table Breakdown:{Colors.END}")
                 for row in table_sizes[:10]:  # Top 10 tables
-                    parts = row.split('|')
-                    if len(parts) == 2:
-                        table_name = parts[0].strip()
-                        size_bytes = int(parts[1].strip())
-                        print(f"  {table_name}: {self.format_bytes(size_bytes)}")
+                    # row is already a tuple (table_name, size_bytes)
+                    table_name = row[0]
+                    size_bytes = row[1]
+                    print(f"  {table_name}: {self.format_bytes(size_bytes)}")
 
         # 3. Execution Counts
         self.print_section_header("3. EXECUTION COUNTS")
@@ -859,13 +857,13 @@ class CloudMedicTool:
         if workflow_data:
             print(f"\n{Colors.BOLD}Top Workflows by Stored Data:{Colors.END}")
             for i, row in enumerate(workflow_data[:5], 1):  # Top 5
-                parts = row.split('|')
-                if len(parts) == 4:
-                    wf_id = parts[0].strip()
-                    wf_name = parts[1].strip()
-                    size_bytes = int(parts[2].strip())
-                    is_active = parts[3].strip()
-                    active_label = "ACTIVE" if is_active == '1' else "inactive"
+                # row is already a tuple (wf_id, wf_name, total_size, exec_count, active)
+                if len(row) == 5:
+                    wf_id = row[0]
+                    wf_name = row[1]
+                    size_bytes = int(row[2])
+                    is_active = row[4]
+                    active_label = "ACTIVE" if is_active == 1 else "inactive"
                     print(f"  {i}. {wf_name} ({wf_id}): {self.format_bytes(size_bytes)} [{active_label}]")
 
         # 5. Recommendations
@@ -884,11 +882,11 @@ class CloudMedicTool:
         # Check for inactive workflow data
         if workflow_data:
             for row in workflow_data[:10]:
-                parts = row.split('|')
-                if len(parts) == 4:
-                    size_bytes = int(parts[2].strip())
-                    is_active = parts[3].strip()
-                    if is_active == '0' and size_bytes > 10 * 1024 * 1024:  # Inactive with >10MB
+                # row is already a tuple (wf_id, wf_name, total_size, exec_count, active)
+                if len(row) == 5:
+                    size_bytes = int(row[2])
+                    is_active = row[4]
+                    if is_active == 0 and size_bytes > 10 * 1024 * 1024:  # Inactive with >10MB
                         recommendations.append("• Inactive workflows have significant stored data - consider cleanup")
                         break
 
@@ -1008,7 +1006,7 @@ class CloudMedicTool:
 
         # Trigger pruning by sending SIGUSR1 to bfp-9000
         self.print_info("Triggering binary data pruning...")
-        prune_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c bfp-9000 -- kill -SIGUSR1 1"
+        prune_cmd = f"kubectl exec {self.pod_name} -n {self.workspace} -c bfp-9000 -- kill -SIGUSR1 1"
         result = self.run_command(prune_cmd)
 
         self.print_success("Pruning signal sent to bfp-9000")
@@ -1750,9 +1748,15 @@ ORDER BY count DESC;
             return "Unknown"
 
     def get_database_size(self):
-        """Get database file size"""
-        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
-        return self.run_command(cmd)
+        """Get database file size in bytes"""
+        cmd = f"kubectl exec {self.pod_name} -n {self.workspace} -c backup-cron -- stat -f %z database.sqlite 2>/dev/null || kubectl exec {self.pod_name} -n {self.workspace} -c backup-cron -- stat -c %s database.sqlite 2>/dev/null"
+        result = self.run_command(cmd)
+        if result:
+            try:
+                return int(result)
+            except ValueError:
+                return None
+        return None
 
     def get_table_sizes(self):
         """Get sizes of database tables"""
