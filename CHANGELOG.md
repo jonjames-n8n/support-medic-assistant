@@ -2,6 +2,93 @@
 
 All notable changes to the Support Medic Assistant Tool will be documented in this file.
 
+## v1.4 (2025-11-28)
+
+### New Features
+
+- **OOM Investigation with Report Generation** (Database Troubleshooting → Option 9)
+  - **Deep Database Analysis:**
+    - Database metrics (size, executions, active workflows)
+    - Table size breakdown with bloat detection
+    - Largest executions by data size
+    - Workflows with most stored data (active vs inactive)
+    - Top workflows by execution count (last 24h)
+    - Workflows with recent errors (last 24h)
+    - Execution queue status (pending/waiting/running)
+    - Execution growth trends (last 7 days)
+  - **Intelligent Analysis:**
+    - "Likely culprits" identification with thresholds:
+      - Table bloat detection (execution_data > 100MB)
+      - Inactive workflow data (> 10MB inactive workflows)
+      - Large individual executions (> 10MB each)
+      - Pending backlog warning (> 100 pending)
+      - Large database (> 200MB)
+    - Actionable recommendations for each issue
+  - **Report Generation:**
+    - Downloadable Markdown report to ~/Downloads
+    - Comprehensive findings summary
+    - SQL commands for data pruning
+    - kubectl commands for manual investigation
+    - Customer-facing recommendations
+
+### Technical Changes
+
+- Added `run_db_query_rows()` helper method for multi-row SQL queries
+- Added `print_section_header()` helper method for formatted output
+- Added `format_bytes()` for human-readable size formatting
+- Added database analysis methods:
+  - `get_database_size()` - Get database file size
+  - `get_table_sizes()` - Table size breakdown (uses dbstat with fallback)
+  - `get_largest_executions()` - Find largest execution data
+  - `get_workflow_data_sizes()` - Total stored data per workflow
+  - `get_top_workflows_24h()` - Top workflows by execution count
+  - `get_error_workflows_24h()` - Error-prone workflows
+  - `get_execution_growth()` - 7-day execution trends
+- Added analysis methods:
+  - `analyze_oom_culprits()` - Intelligent root cause analysis
+  - `print_recommended_actions()` - Display actionable recommendations
+  - `generate_oom_report()` - Create downloadable Markdown report
+- Database troubleshooting menu now has 11 options (moved "Back to main menu" to option 11)
+
+### Bug Fixes
+
+- Fixed SQL escaping issues in complex queries (removed incorrect shell escaping)
+- Fixed `run_db_query_rows()` invalid parameter error
+
+---
+
+## v1.3 (2025-11-25)
+
+### New Features
+
+- **Pre-Menu for Operation Mode Selection**
+  - Choose between full medic operations or deleted instance recovery
+  - Cleaner user flow for different use cases
+
+- **Deleted Instance Recovery Menu**
+  - List available backups for deleted instances
+  - Export workflows from latest backup
+  - Export workflows from specific backup
+  - Backups retained for 90 days after deletion
+
+### Bug Fixes
+
+- **Pod-required operations check**: Operations requiring a pod now show clear error when Pod: None
+  - Lists available operations without pod (export from backup, change workspace)
+  - Prevents cryptic errors when trying to run operations without a pod
+
+- **Export workflows validation**: Live instance export now validates success/failure
+  - Checks for error messages in exported files
+  - Cleans up failed exports automatically
+
+### Improvements
+
+- Better user guidance for workspace recovery scenarios
+- Clearer error messages when backups not found
+- Improved handling of deleted instance workflows
+
+---
+
 ## v1.2.2 (2025-11-24) - Hotfix
 
 ### Bug Fixes
