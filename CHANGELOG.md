@@ -2,6 +2,63 @@
 
 All notable changes to the Support Medic Assistant Tool will be documented in this file.
 
+## v1.4 (2025-11-28)
+
+### New Features
+
+- **OOM Investigation** (Database Troubleshooting → Option 9)
+  - Automatic analysis of database metrics (size, executions, active workflows)
+  - Top workflows by execution count (last 24h)
+  - Workflows with recent errors (last 24h)
+  - Execution queue status (pending/waiting/running)
+  - Execution growth over last 7 days
+  - "Likely culprits" analysis with actionable recommendations
+    - High execution volume detection (>500 executions/24h)
+    - Pending backlog warning (>100 pending)
+    - Large database detection (>200 MB)
+    - Error-prone workflow identification (>50 errors/24h)
+  - kubectl commands for manual Grafana/log investigation
+
+### Technical Changes
+
+- Added `run_db_query_rows()` helper method for multi-row SQL queries
+- Added `print_section_header()` helper method for formatted output
+- Database troubleshooting menu now has 11 options (moved "Back to main menu" to option 11)
+
+---
+
+## v1.3 (2025-11-25)
+
+### New Features
+
+- **Pre-Menu for Operation Mode Selection**
+  - Choose between full medic operations or deleted instance recovery
+  - Cleaner user flow for different use cases
+
+- **Deleted Instance Recovery Menu**
+  - List available backups for deleted instances
+  - Export workflows from latest backup
+  - Export workflows from specific backup
+  - Backups retained for 90 days after deletion
+
+### Bug Fixes
+
+- **Pod-required operations check**: Operations requiring a pod now show clear error when Pod: None
+  - Lists available operations without pod (export from backup, change workspace)
+  - Prevents cryptic errors when trying to run operations without a pod
+
+- **Export workflows validation**: Live instance export now validates success/failure
+  - Checks for error messages in exported files
+  - Cleans up failed exports automatically
+
+### Improvements
+
+- Better user guidance for workspace recovery scenarios
+- Clearer error messages when backups not found
+- Improved handling of deleted instance workflows
+
+---
+
 ## v1.2.2 (2025-11-24) - Hotfix
 
 ### Bug Fixes

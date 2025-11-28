@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.3
+Cloud Medic Assistant Tool v1.4
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.4:
+- Added OOM Investigation (Database Troubleshooting → Option 9)
+- Automatic analysis of database metrics, execution patterns, and memory pressure
+- "Likely culprits" analysis with actionable recommendations
+- kubectl commands for manual Grafana/log investigation
 
 Changelog v1.3:
 - Added pre-menu for operation mode selection
@@ -80,6 +86,13 @@ class CloudMedicTool:
         """Print warning message"""
         print(f"{Colors.YELLOW}⚠ {text}{Colors.END}")
 
+    def print_section_header(self, title):
+        """Print a section header for OOM investigation"""
+        print()
+        print("─" * 65)
+        print(title)
+        print("─" * 65)
+
     def run_command(self, cmd, capture_output=True, check=True):
         """Run a shell command and return output"""
         try:
@@ -119,6 +132,21 @@ class CloudMedicTool:
                 return self.run_db_query(sql_cmd, show_error_details=False)
             return None
 
+    def run_db_query_rows(self, sql_query, show_error_details=False):
+        """Run SQL query and return list of rows (pipe-separated)"""
+        # Escape single quotes in SQL
+        sql_escaped = sql_query.replace("'", "'\\''")
+
+        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 -separator '|' database.sqlite \"{sql_escaped}\""
+
+        result = self.run_command(cmd, show_error_details=show_error_details)
+
+        if result:
+            # Split into lines, filter empty
+            lines = [line.strip() for line in result.strip().split('\n') if line.strip()]
+            return lines
+        return []
+
     def get_input(self, prompt, required=True):
         """Get user input with optional validation"""
         while True:
@@ -140,7 +168,7 @@ class CloudMedicTool:
 
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup v1.3")
+        self.print_header("Cloud Medic Assistant - Setup v1.4")
 
         # VPN reminder
         self.print_warning("REMINDER: Make sure you're connected to the VPN!")
@@ -445,8 +473,9 @@ class CloudMedicTool:
                 ("6", "View webhooks", self.view_webhooks),
                 ("7", "Find problematic workflows", self.find_problematic_workflows),
                 ("8", "Check executions by status", self.check_execution_status),
-                ("9", "Raw SQL shell (advanced)", self.open_database_shell),
-                ("10", "Back to main menu", None)
+                ("9", "Investigate OOM cause", self.investigate_oom),
+                ("10", "Raw SQL shell (advanced)", self.open_database_shell),
+                ("11", "Back to main menu", None)
             ]
 
             for key, description, _ in troubleshooting_options:
@@ -455,7 +484,7 @@ class CloudMedicTool:
             print()
             choice = self.get_input("Select troubleshooting option: ", required=False)
 
-            if choice == '10':
+            if choice == '11':
                 break
 
             for key, _, func in troubleshooting_options:
@@ -949,6 +978,247 @@ ORDER BY count DESC;
                     print(f"  {status:<15} {count}")
 
         input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    # ============================================================
+    # Feature: OOM Investigation
+    # ============================================================
+
+    def investigate_oom(self):
+        """Investigate OOM (Out of Memory) crash causes"""
+        self.print_header("OOM INVESTIGATION")
+
+        print("Gathering data... please wait.\n")
+
+        # 1. DATABASE METRICS
+        self.print_section_header("📊 DATABASE METRICS")
+
+        # Database size
+        size_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
+        db_size = self.run_command(size_cmd)
+
+        # Total executions
+        total_exec = self.run_db_query("SELECT COUNT(*) FROM execution_entity;")
+
+        # Active workflows
+        active_wf = self.run_db_query("SELECT COUNT(*) FROM workflow_entity WHERE active = 1;")
+
+        print(f"Database Size:        {db_size or 'Unknown'}")
+        print(f"Total Executions:     {total_exec or 'Unknown'}")
+        print(f"Active Workflows:     {active_wf or 'Unknown'}")
+
+        # 2. TOP WORKFLOWS BY EXECUTION COUNT
+        self.print_section_header("🔥 TOP WORKFLOWS BY EXECUTION COUNT (Last 24h)")
+
+        top_workflows_sql = """
+        SELECT
+            e.workflowId,
+            COALESCE(w.name, 'Unknown') as name,
+            COUNT(*) as exec_count
+        FROM execution_entity e
+        LEFT JOIN workflow_entity w ON e.workflowId = w.id
+        WHERE datetime(e.startedAt) > datetime('now', '-1 day')
+        GROUP BY e.workflowId
+        ORDER BY exec_count DESC
+        LIMIT 5;
+        """
+
+        top_workflows = self.run_db_query_rows(top_workflows_sql)
+
+        print(f"{'ID':<20} {'Name':<30} {'Executions':<10}")
+        print("─" * 62)
+
+        if top_workflows:
+            for row in top_workflows:
+                wf_id, name, count = row.split('|')
+                # Truncate name if too long
+                name = name[:28] + '..' if len(name) > 30 else name
+                print(f"{wf_id:<20} {name:<30} {count:<10}")
+        else:
+            print("No executions in the last 24 hours")
+
+        # 3. WORKFLOWS WITH ERRORS
+        self.print_section_header("⚠️  WORKFLOWS WITH RECENT ERRORS (Last 24h)")
+
+        error_workflows_sql = """
+        SELECT
+            e.workflowId,
+            COALESCE(w.name, 'Unknown') as name,
+            COUNT(*) as error_count
+        FROM execution_entity e
+        LEFT JOIN workflow_entity w ON e.workflowId = w.id
+        WHERE e.status IN ('error', 'crashed', 'failed')
+        AND datetime(e.startedAt) > datetime('now', '-1 day')
+        GROUP BY e.workflowId
+        HAVING error_count > 0
+        ORDER BY error_count DESC
+        LIMIT 5;
+        """
+
+        error_workflows = self.run_db_query_rows(error_workflows_sql)
+
+        print(f"{'ID':<20} {'Name':<30} {'Errors':<10}")
+        print("─" * 62)
+
+        if error_workflows:
+            for row in error_workflows:
+                wf_id, name, count = row.split('|')
+                name = name[:28] + '..' if len(name) > 30 else name
+                print(f"{wf_id:<20} {name:<30} {count:<10}")
+        else:
+            print("No workflow errors in the last 24 hours")
+
+        # 4. EXECUTION QUEUE STATUS
+        self.print_section_header("⏳ EXECUTION QUEUE STATUS")
+
+        pending_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'new';")
+        waiting_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'waiting';")
+        running_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'running';")
+
+        pending_int = int(pending_count) if pending_count else 0
+        waiting_int = int(waiting_count) if waiting_count else 0
+        running_int = int(running_count) if running_count else 0
+
+        pending_warning = " ⚠️  HIGH - may cause memory pressure" if pending_int > 100 else ""
+
+        print(f"Pending ('new'):      {pending_int}{pending_warning}")
+        print(f"Waiting:              {waiting_int}")
+        print(f"Running:              {running_int}")
+
+        # 5. EXECUTION GROWTH
+        self.print_section_header("📈 EXECUTION GROWTH (Last 7 Days)")
+
+        growth_sql = """
+        SELECT
+            date(startedAt) as day,
+            COUNT(*) as executions
+        FROM execution_entity
+        WHERE datetime(startedAt) > datetime('now', '-7 days')
+        GROUP BY date(startedAt)
+        ORDER BY day DESC;
+        """
+
+        growth_data = self.run_db_query_rows(growth_sql)
+
+        print(f"{'Date':<15} {'Executions':<10}")
+        print("─" * 25)
+
+        if growth_data:
+            for row in growth_data:
+                day, count = row.split('|')
+                print(f"{day:<15} {count:<10}")
+        else:
+            print("No execution data available")
+
+        # 6. LIKELY CULPRITS ANALYSIS
+        self.print_section_header("🎯 LIKELY CULPRITS")
+
+        culprits = []
+
+        # Check for high execution volume workflow
+        if top_workflows:
+            first_wf = top_workflows[0].split('|')
+            wf_id, wf_name, exec_count = first_wf[0], first_wf[1], int(first_wf[2])
+
+            if exec_count > 500:
+                # Check if this workflow also has errors
+                error_count = 0
+                if error_workflows:
+                    for row in error_workflows:
+                        parts = row.split('|')
+                        if parts[0] == wf_id:
+                            error_count = int(parts[2])
+                            break
+
+                culprits.append({
+                    'type': 'HIGH_EXECUTION_VOLUME',
+                    'workflow_id': wf_id,
+                    'workflow_name': wf_name,
+                    'exec_count': exec_count,
+                    'error_count': error_count
+                })
+
+        # Check for pending backlog
+        if pending_int > 100:
+            culprits.append({
+                'type': 'PENDING_BACKLOG',
+                'count': pending_int
+            })
+
+        # Check for large database
+        if db_size:
+            # Parse size (e.g., "245M" or "1.2G")
+            size_str = db_size.strip()
+            size_num = float(size_str[:-1]) if size_str else 0
+            size_unit = size_str[-1] if size_str else 'M'
+
+            size_mb = size_num if size_unit == 'M' else size_num * 1024 if size_unit == 'G' else size_num / 1024
+
+            if size_mb > 200:
+                culprits.append({
+                    'type': 'LARGE_DATABASE',
+                    'size': db_size
+                })
+
+        # Check for error-prone workflow
+        if error_workflows:
+            first_error_wf = error_workflows[0].split('|')
+            err_wf_id, err_wf_name, err_count = first_error_wf[0], first_error_wf[1], int(first_error_wf[2])
+
+            if err_count > 50:
+                # Only add if not already added as high execution volume
+                already_added = any(c.get('workflow_id') == err_wf_id for c in culprits)
+                if not already_added:
+                    culprits.append({
+                        'type': 'ERROR_PRONE_WORKFLOW',
+                        'workflow_id': err_wf_id,
+                        'workflow_name': err_wf_name,
+                        'error_count': err_count
+                    })
+
+        # Display culprits
+        if culprits:
+            for i, culprit in enumerate(culprits, 1):
+                print()
+                if culprit['type'] == 'HIGH_EXECUTION_VOLUME':
+                    print(f"{i}. ⚠️  HIGH EXECUTION VOLUME: \"{culprit['workflow_name']}\" ({culprit['workflow_id']})")
+                    error_msg = f" with {culprit['error_count']} errors" if culprit['error_count'] > 0 else ""
+                    print(f"   → {culprit['exec_count']} executions in 24h{error_msg}")
+                    print(f"   → Recommendation: Check if processing large data payloads")
+                    if culprit['error_count'] > 0:
+                        print(f"   → Recommendation: Review for infinite loops or retries")
+
+                elif culprit['type'] == 'PENDING_BACKLOG':
+                    print(f"{i}. ⚠️  PENDING EXECUTION BACKLOG: {culprit['count']} pending")
+                    print(f"   → These pile up and consume memory on startup")
+                    print(f"   → Recommendation: Cancel pending executions (Main Menu → Option 7)")
+
+                elif culprit['type'] == 'LARGE_DATABASE':
+                    print(f"{i}. ⚠️  DATABASE SIZE: {culprit['size']}")
+                    print(f"   → Large databases slow down startup and queries")
+                    print(f"   → Recommendation: Consider pruning old executions")
+
+                elif culprit['type'] == 'ERROR_PRONE_WORKFLOW':
+                    print(f"{i}. ⚠️  ERROR-PRONE WORKFLOW: \"{culprit['workflow_name']}\" ({culprit['workflow_id']})")
+                    print(f"   → {culprit['error_count']} errors in last 24h")
+                    print(f"   → Recommendation: Workflow may be retrying repeatedly, consuming memory")
+        else:
+            print("\nNo obvious culprits detected from database analysis.")
+            print("Check Grafana memory metrics for runtime memory spikes.")
+
+        # 7. MANUAL CHECKS
+        self.print_section_header("📋 MANUAL CHECKS (Grafana / kubectl)")
+
+        print("\nRun these commands for additional context:\n")
+        print("# Memory usage over time (check Grafana)")
+        print("Dashboard: n8n Cloud → Instance Metrics → Memory\n")
+        print("# Pod events (OOMKill timestamps)")
+        print(f"kubectl describe pod {self.pod_name} -n {self.workspace} | grep -A 15 Events\n")
+        print("# Logs before crash")
+        print(f"kubectl logs {self.pod_name} -c n8n --previous --tail=100\n")
+        print("# Current memory usage")
+        print(f"kubectl top pod {self.pod_name} -n {self.workspace}\n")
+
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
     # ============================================================
     # Feature 2: Log Download Menu
@@ -1800,7 +2070,7 @@ ORDER BY count DESC;
     def show_pre_menu(self):
         """Show pre-menu for operation mode selection"""
         print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.3':^60}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.4':^60}{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}\n")
 
         print(f"{Colors.BOLD}Select operation mode:{Colors.END}\n")
