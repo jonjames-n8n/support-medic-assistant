@@ -134,10 +134,7 @@ class CloudMedicTool:
 
     def run_db_query_rows(self, sql_query):
         """Run SQL query and return list of rows (pipe-separated)"""
-        # Escape single quotes in SQL
-        sql_escaped = sql_query.replace("'", "'\\''")
-
-        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 -separator '|' database.sqlite \"{sql_escaped}\""
+        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 -separator '|' database.sqlite \"{sql_query}\""
 
         result = self.run_command(cmd)
 
