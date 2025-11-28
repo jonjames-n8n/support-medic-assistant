@@ -117,9 +117,27 @@ class CloudMedicTool:
     def run_db_query(self, sql_cmd, show_error_details=True):
         """Run database query with better error handling"""
         try:
-            db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
-            result = self.run_command(db_cmd, capture_output=True, check=True)
-            return result
+            # Use stdin piping to avoid shell escaping issues
+            cmd = [
+                'kubectl', 'exec', '-i',
+                self.pod_name, '-n', self.workspace,
+                '-c', 'backup-cron', '--',
+                'sqlite3', 'database.sqlite'
+            ]
+
+            result = subprocess.run(
+                cmd,
+                input=sql_cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                return result.stdout.strip() if result.stdout.strip() else None
+            else:
+                raise Exception(f"Query failed with exit code {result.returncode}")
+
         except Exception as e:
             self.print_error("Database query failed - connection issue or data too large")
             if show_error_details:
@@ -134,15 +152,29 @@ class CloudMedicTool:
 
     def run_db_query_rows(self, sql_query):
         """Run SQL query and return list of rows (pipe-separated)"""
-        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 -separator '|' database.sqlite \"{sql_query}\""
+        # Use stdin piping to avoid shell escaping issues
+        cmd = [
+            'kubectl', 'exec', '-i',
+            self.pod_name, '-n', self.workspace,
+            '-c', 'backup-cron', '--',
+            'sqlite3', '-separator', '|', 'database.sqlite'
+        ]
 
-        result = self.run_command(cmd)
+        try:
+            result = subprocess.run(
+                cmd,
+                input=sql_query,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
 
-        if result:
-            # Split into lines, filter empty
-            lines = [line.strip() for line in result.strip().split('\n') if line.strip()]
-            return lines
-        return []
+            if result.returncode == 0 and result.stdout.strip():
+                return [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+            return []
+        except Exception as e:
+            self.print_error(f"Query failed: {e}")
+            return []
 
     def get_input(self, prompt, required=True):
         """Get user input with optional validation"""
