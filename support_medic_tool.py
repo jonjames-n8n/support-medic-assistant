@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.4
+Cloud Medic Assistant Tool v1.4.1
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.4.1:
+- Menu reorganization: Main menu now uses 7 category submenus
+- Added quit option ('q') to pre-menu
+- New feature: Storage Diagnostics (Health & Diagnostics → Option 3)
+- New feature: Clear Queued Executions (Execution Management → Option 4)
+- New feature: Prune Binary Data (Database & Storage → Option 3)
 
 Changelog v1.4:
 - Added OOM Investigation (Database Troubleshooting → Option 9)
@@ -197,7 +204,7 @@ class CloudMedicTool:
 
     def setup_workspace(self):
         """Get workspace name and cluster information"""
-        self.print_header("Cloud Medic Assistant - Setup v1.4")
+        self.print_header("Cloud Medic Assistant - Setup v1.4.1")
 
         # VPN reminder
         self.print_warning("REMINDER: Make sure you're connected to the VPN!")
@@ -340,63 +347,333 @@ class CloudMedicTool:
         input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def show_main_menu(self):
-        """Display main menu and get user choice"""
-        self.print_header("Main Menu")
-        print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
-        print(f"{Colors.BOLD}Cluster:{Colors.END} {self.cluster}")
-        print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+        """Display main menu with category submenus"""
+        while True:
+            self.print_header("Main Menu")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Cluster:{Colors.END} {self.cluster}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
 
-        menu_options = [
-            ("0", "Health check (quick status)", self.health_check),
-            ("1", "Export workflows (from live instance)", self.export_workflows),
-            ("2", "Export workflows (from backup)", self.export_from_backup),
-            ("3", "Import workflows", self.import_workflows),
-            ("4", "Deactivate all workflows", self.deactivate_all_workflows),
-            ("5", "Deactivate specific workflow", self.deactivate_workflow),
-            ("6", "Check execution by ID", self.check_execution),
-            ("7", "Cancel pending executions", self.cancel_pending_executions),
-            ("8", "Cancel waiting executions", self.cancel_waiting_executions),
-            ("9", "Take backup", self.take_backup),
-            ("10", "View recent logs", self.view_logs),
-            ("11", "Database troubleshooting (guided)", self.database_troubleshooting),
-            ("12", "Redeploy instance (cloudbot)", self.redeploy_instance),
-            ("13", "Change workspace/cluster", self.change_workspace_cluster),
-            ("14", "Download logs", self.download_logs),
-            ("15", "Disable 2FA", self.disable_2fa),
-            ("16", "Change owner email", self.change_owner_email),
-            ("q", "Quit", None)
-        ]
+            menu_options = [
+                ("1", "Health & Diagnostics", self.menu_health_diagnostics),
+                ("2", "Workflow Operations", self.menu_workflow_operations),
+                ("3", "Execution Management", self.menu_execution_management),
+                ("4", "Database & Storage", self.menu_database_storage),
+                ("5", "User & Access", self.menu_user_access),
+                ("6", "Logs", self.menu_logs),
+                ("7", "Settings", self.menu_settings),
+                ("q", "Quit", None)
+            ]
 
-        for key, description, _ in menu_options:
-            print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
 
-        print()
-        choice = self.get_input("Select an option: ", required=False)
-
-        # Pod-required operation check (Bug Fix #1)
-        pod_not_required = ['2', '13']  # Export from backup, change workspace
-
-        if choice not in pod_not_required and choice != 'q' and not self.pod_name:
-            self.print_error("This operation requires a valid pod")
             print()
-            print(f"{Colors.BOLD}Pod is not available for workspace: {self.workspace}{Colors.END}")
-            print()
-            print(f"{Colors.BOLD}Available options without pod:{Colors.END}")
-            print("  • Option 2: Export from backup")
-            print("  • Option 13: Change workspace/cluster")
-            print("  • Option q: Quit")
-            input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
-            return True
+            choice = self.get_input("Select an option: ", required=False)
 
-        # Find and execute the selected option
-        for key, _, func in menu_options:
-            if choice == key:
-                if func:
-                    func()
-                return choice != 'q'
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key:
+                    if func:
+                        func()
+                    else:
+                        return False  # Quit selected
+                    break
+            else:
+                if choice:
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
-        self.print_error("Invalid option. Please try again.")
+            if choice == 'q':
+                return False
+
         return True
+
+    # ============================================================
+    # Category Submenus
+    # ============================================================
+
+    def menu_health_diagnostics(self):
+        """Health & Diagnostics submenu"""
+        while True:
+            self.print_header("Health & Diagnostics")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Health check (quick status)", self.health_check),
+                ("2", "Check execution status (detailed)", self.check_execution_status),
+                ("3", "Storage diagnostics", self.storage_diagnostics),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Check if pod is required
+            if not self.pod_name and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_workflow_operations(self):
+        """Workflow Operations submenu"""
+        while True:
+            self.print_header("Workflow Operations")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Export workflows (from live instance)", self.export_workflows),
+                ("2", "Export workflows (from backup)", self.export_from_backup),
+                ("3", "Import workflows", self.import_workflows),
+                ("4", "Deactivate all workflows", self.deactivate_all_workflows),
+                ("5", "Deactivate specific workflow", self.deactivate_workflow),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Option 2 (Export from backup) doesn't require pod
+            if not self.pod_name and choice != '2' and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                print(f"\n{Colors.BOLD}Available options without pod:{Colors.END}")
+                print("  • Option 2: Export from backup")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_execution_management(self):
+        """Execution Management submenu"""
+        while True:
+            self.print_header("Execution Management")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Check execution by ID", self.check_execution),
+                ("2", "Cancel pending executions", self.cancel_pending_executions),
+                ("3", "Cancel waiting executions", self.cancel_waiting_executions),
+                ("4", "Clear queued executions", self.clear_queued_executions),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Check if pod is required
+            if not self.pod_name and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_database_storage(self):
+        """Database & Storage submenu"""
+        while True:
+            self.print_header("Database & Storage")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Take backup", self.take_backup),
+                ("2", "Database troubleshooting (guided)", self.database_troubleshooting),
+                ("3", "Prune binary data", self.prune_binary_data),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Check if pod is required
+            if not self.pod_name and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_user_access(self):
+        """User & Access submenu"""
+        while True:
+            self.print_header("User & Access")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Disable 2FA", self.disable_2fa),
+                ("2", "Change owner email", self.change_owner_email),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Check if pod is required
+            if not self.pod_name and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_logs(self):
+        """Logs submenu"""
+        while True:
+            self.print_header("Logs")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "View recent logs", self.view_logs),
+                ("2", "Download logs", self.download_logs),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Check if pod is required
+            if not self.pod_name and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    def menu_settings(self):
+        """Settings submenu"""
+        while True:
+            self.print_header("Settings")
+            print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
+            print(f"{Colors.BOLD}Cluster:{Colors.END} {self.cluster}")
+            print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
+
+            menu_options = [
+                ("1", "Change workspace/cluster", self.change_workspace_cluster),
+                ("2", "Redeploy instance (cloudbot)", self.redeploy_instance),
+                ("b", "Back to main menu", None)
+            ]
+
+            for key, description, _ in menu_options:
+                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+
+            print()
+            choice = self.get_input("Select an option: ", required=False)
+
+            if choice == 'b':
+                break
+
+            # Option 1 (Change workspace) doesn't require pod
+            if not self.pod_name and choice != '1' and choice != 'b':
+                self.print_error("This operation requires a valid pod")
+                print(f"\n{Colors.BOLD}Available options without pod:{Colors.END}")
+                print("  • Option 1: Change workspace/cluster")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+                continue
+
+            # Find and execute the selected option
+            for key, _, func in menu_options:
+                if choice == key and func:
+                    func()
+                    break
+            else:
+                if choice and choice != 'b':
+                    self.print_error("Invalid option. Please try again.")
+                    input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
+
+    # ============================================================
+    # Feature Methods
+    # ============================================================
 
     def health_check(self):
         """Quick health check of pod and database"""
@@ -485,6 +762,261 @@ class CloudMedicTool:
             print(f"{Colors.YELLOW}⚠ Running with issues - review above{Colors.END}")
         else:
             print(f"{Colors.RED}✗ Unhealthy - needs attention{Colors.END}")
+
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+
+    def storage_diagnostics(self):
+        """Analyze storage usage - database, binary data, execution metrics"""
+        self.print_header("STORAGE DIAGNOSTICS")
+        print("Analyzing storage usage...\n")
+
+        # 1. Disk Usage
+        self.print_section_header("1. DISK USAGE")
+        disk_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c n8n -- df -h /home/node/.n8n 2>/dev/null"
+        disk_usage = self.run_command(disk_cmd)
+        if disk_usage:
+            print(disk_usage)
+        else:
+            self.print_error("Could not retrieve disk usage")
+
+        # 2. Database Size
+        self.print_section_header("2. DATABASE SIZE")
+        db_size_bytes = self.get_database_size()
+        if db_size_bytes:
+            print(f"Total: {self.format_bytes(db_size_bytes)}")
+
+            # Show table sizes
+            table_sizes = self.get_table_sizes()
+            if table_sizes:
+                print(f"\n{Colors.BOLD}Table Breakdown:{Colors.END}")
+                for row in table_sizes[:10]:  # Top 10 tables
+                    parts = row.split('|')
+                    if len(parts) == 2:
+                        table_name = parts[0].strip()
+                        size_bytes = int(parts[1].strip())
+                        print(f"  {table_name}: {self.format_bytes(size_bytes)}")
+
+        # 3. Execution Counts
+        self.print_section_header("3. EXECUTION COUNTS")
+
+        # Total executions
+        total_sql = "SELECT COUNT(*) FROM execution_entity;"
+        total_exec = self.run_db_query(total_sql, show_error_details=False)
+        if total_exec:
+            print(f"Total Executions: {total_exec}")
+
+        # By status
+        status_sql = """
+        SELECT status, COUNT(*) as count
+        FROM execution_entity
+        GROUP BY status
+        ORDER BY count DESC;
+        """
+        status_rows = self.run_db_query_rows(status_sql)
+        if status_rows:
+            print(f"\n{Colors.BOLD}By Status:{Colors.END}")
+            for row in status_rows:
+                parts = row.split('|')
+                if len(parts) == 2:
+                    status = parts[0].strip()
+                    count = parts[1].strip()
+                    print(f"  {status}: {count}")
+
+        # Last 7 days
+        growth_data = self.get_execution_growth()
+        if growth_data:
+            print(f"\n{Colors.BOLD}Last 7 Days:{Colors.END}")
+            for row in growth_data:
+                parts = row.split('|')
+                if len(parts) == 2:
+                    date = parts[0].strip()
+                    count = parts[1].strip()
+                    print(f"  {date}: {count} executions")
+
+        # 4. Binary Data
+        self.print_section_header("4. BINARY DATA")
+
+        # Total binary data size
+        binary_sql = """
+        SELECT COUNT(*) as count,
+               COALESCE(SUM(LENGTH(data)), 0) as total_size
+        FROM execution_data;
+        """
+        binary_rows = self.run_db_query_rows(binary_sql)
+        if binary_rows and binary_rows[0]:
+            parts = binary_rows[0].split('|')
+            if len(parts) == 2:
+                count = parts[0].strip()
+                size_bytes = int(parts[1].strip())
+                print(f"Binary Data Entries: {count}")
+                print(f"Total Size: {self.format_bytes(size_bytes)}")
+
+                if size_bytes > 100 * 1024 * 1024:  # > 100MB
+                    self.print_warning(f"\n⚠ Binary data is {self.format_bytes(size_bytes)} - consider pruning")
+
+        # Top workflows by data size
+        workflow_data = self.get_workflow_data_sizes()
+        if workflow_data:
+            print(f"\n{Colors.BOLD}Top Workflows by Stored Data:{Colors.END}")
+            for i, row in enumerate(workflow_data[:5], 1):  # Top 5
+                parts = row.split('|')
+                if len(parts) == 4:
+                    wf_id = parts[0].strip()
+                    wf_name = parts[1].strip()
+                    size_bytes = int(parts[2].strip())
+                    is_active = parts[3].strip()
+                    active_label = "ACTIVE" if is_active == '1' else "inactive"
+                    print(f"  {i}. {wf_name} ({wf_id}): {self.format_bytes(size_bytes)} [{active_label}]")
+
+        # 5. Recommendations
+        self.print_section_header("5. RECOMMENDATIONS")
+
+        recommendations = []
+
+        # Check binary data bloat
+        if binary_rows and binary_rows[0]:
+            parts = binary_rows[0].split('|')
+            if len(parts) == 2:
+                size_bytes = int(parts[1].strip())
+                if size_bytes > 100 * 1024 * 1024:  # > 100MB
+                    recommendations.append("• Run 'Prune binary data' to clean old execution data")
+
+        # Check for inactive workflow data
+        if workflow_data:
+            for row in workflow_data[:10]:
+                parts = row.split('|')
+                if len(parts) == 4:
+                    size_bytes = int(parts[2].strip())
+                    is_active = parts[3].strip()
+                    if is_active == '0' and size_bytes > 10 * 1024 * 1024:  # Inactive with >10MB
+                        recommendations.append("• Inactive workflows have significant stored data - consider cleanup")
+                        break
+
+        # Check database size
+        if db_size_bytes and db_size_bytes > 200 * 1024 * 1024:  # > 200MB
+            recommendations.append("• Database is large - review execution retention settings")
+
+        if recommendations:
+            for rec in recommendations:
+                print(rec)
+        else:
+            print(f"{Colors.GREEN}✓ Storage usage looks healthy{Colors.END}")
+
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+
+    def clear_queued_executions(self):
+        """Clear all queued executions (status='new')"""
+        self.print_header("CLEAR QUEUED EXECUTIONS")
+
+        # Get count of queued executions
+        count_sql = "SELECT COUNT(*) FROM execution_entity WHERE status = 'new';"
+        queued_count = self.run_db_query(count_sql, show_error_details=False)
+
+        if not queued_count or queued_count == '0':
+            self.print_info("No queued executions found")
+            input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+            return
+
+        print(f"Found {Colors.YELLOW}{queued_count}{Colors.END} queued execution(s)\n")
+
+        # Show some examples
+        preview_sql = """
+        SELECT id, workflowId, datetime(startedAt) as started
+        FROM execution_entity
+        WHERE status = 'new'
+        ORDER BY startedAt DESC
+        LIMIT 5;
+        """
+        preview_rows = self.run_db_query_rows(preview_sql)
+        if preview_rows:
+            print(f"{Colors.BOLD}Preview (showing up to 5):{Colors.END}")
+            for row in preview_rows:
+                parts = row.split('|')
+                if len(parts) >= 2:
+                    exec_id = parts[0].strip()
+                    wf_id = parts[1].strip()
+                    started = parts[2].strip() if len(parts) > 2 else 'N/A'
+                    print(f"  • Execution {exec_id} (Workflow: {wf_id}, Started: {started})")
+            print()
+
+        # Confirm
+        if not self.confirm(f"Clear all {queued_count} queued execution(s)?"):
+            self.print_info("Operation cancelled")
+            input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+            return
+
+        # Take backup first
+        self.print_info("Taking backup before clearing executions...")
+        backup_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- ./backup.sh"
+        self.run_command(backup_cmd)
+
+        # Clear queued executions
+        self.print_info("Clearing queued executions...")
+        delete_sql = "DELETE FROM execution_entity WHERE status = 'new';"
+        result = self.run_db_query(delete_sql, show_error_details=True)
+
+        # Verify
+        verify_sql = "SELECT COUNT(*) FROM execution_entity WHERE status = 'new';"
+        remaining = self.run_db_query(verify_sql, show_error_details=False)
+
+        if remaining == '0':
+            self.print_success(f"Successfully cleared {queued_count} queued execution(s)")
+        else:
+            self.print_warning(f"Warning: {remaining} queued execution(s) still remain")
+
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+
+    def prune_binary_data(self):
+        """Trigger bfp-9000 sidecar to prune old binary data"""
+        self.print_header("PRUNE BINARY DATA")
+
+        print("This will trigger the bfp-9000 sidecar to prune old execution binary data.")
+        print("The sidecar will delete binary data for executions older than the retention period.\n")
+
+        # Check if bfp-9000 container exists
+        check_cmd = f"kubectl get pod {self.pod_name} -n {self.workspace} -o jsonpath='{{.spec.containers[*].name}}'"
+        containers = self.run_command(check_cmd)
+
+        if not containers or 'bfp-9000' not in containers:
+            self.print_error("bfp-9000 container not found in pod")
+            print("\nThis feature requires the bfp-9000 sidecar container.")
+            print("The pod may be using a different binary data pruning mechanism.")
+            input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+            return
+
+        # Show current binary data stats
+        self.print_info("Checking current binary data usage...")
+        binary_sql = """
+        SELECT COUNT(*) as count,
+               COALESCE(SUM(LENGTH(data)), 0) as total_size
+        FROM execution_data;
+        """
+        binary_rows = self.run_db_query_rows(binary_sql)
+        if binary_rows and binary_rows[0]:
+            parts = binary_rows[0].split('|')
+            if len(parts) == 2:
+                count = parts[0].strip()
+                size_bytes = int(parts[1].strip())
+                print(f"Current binary data entries: {count}")
+                print(f"Current size: {self.format_bytes(size_bytes)}\n")
+
+        # Confirm
+        if not self.confirm("Trigger binary data pruning?"):
+            self.print_info("Operation cancelled")
+            input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+            return
+
+        # Trigger pruning by sending SIGUSR1 to bfp-9000
+        self.print_info("Triggering binary data pruning...")
+        prune_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c bfp-9000 -- kill -SIGUSR1 1"
+        result = self.run_command(prune_cmd)
+
+        self.print_success("Pruning signal sent to bfp-9000")
+        print("\nThe sidecar will now prune old binary data in the background.")
+        print("This may take several minutes depending on the amount of data.")
+        print("\nYou can monitor progress by:")
+        print("  • Checking bfp-9000 container logs")
+        print("  • Running storage diagnostics again after a few minutes")
 
         input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
@@ -1474,7 +2006,7 @@ ORDER BY count DESC;
 **Instance:** {data['workspace']}
 **Cluster:** {data.get('cluster', 'Unknown')}
 **Generated:** {data['timestamp']}
-**Generated by:** Cloud Medic Tool v1.4
+**Generated by:** Cloud Medic Tool v1.4.1
 
 ---
 
@@ -1597,7 +2129,7 @@ ORDER BY count DESC;
         report += "# Current memory\n"
         report += f"kubectl top pod {data.get('pod_name', 'POD_NAME')} -n {data['workspace']}\n"
         report += "```\n\n"
-        report += "---\n\n*Report generated by Cloud Medic Tool v1.4*\n"
+        report += "---\n\n*Report generated by Cloud Medic Tool v1.4.1*\n"
 
         with open(filepath, 'w') as f:
             f.write(report)
@@ -2454,12 +2986,14 @@ ORDER BY count DESC;
     def show_pre_menu(self):
         """Show pre-menu for operation mode selection"""
         print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.4':^60}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.4.1':^60}{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}\n")
 
         print(f"{Colors.BOLD}Select operation mode:{Colors.END}\n")
         print(f"{Colors.GREEN}1.{Colors.END} Full medic operations (live instance)")
-        print(f"{Colors.GREEN}2.{Colors.END} Recover workflows from deleted instance")
+        print(f"{Colors.GREEN}2.{Colors.END} Recover workflows from deleted instance)")
+        print()
+        print(f"{Colors.YELLOW}q.{Colors.END} Quit")
         print()
 
         choice = self.get_input("Select option: ")
@@ -2699,7 +3233,11 @@ ORDER BY count DESC;
                 # Show pre-menu
                 choice = self.show_pre_menu()
 
-                if choice == '1':
+                if choice.lower() == 'q':
+                    # User wants to quit
+                    break
+
+                elif choice == '1':
                     # Full medic operations (existing flow)
                     if not self.setup_workspace():
                         continue
@@ -2721,7 +3259,7 @@ ORDER BY count DESC;
                         continue
 
                 else:
-                    self.print_error("Invalid option. Please select 1 or 2.")
+                    self.print_error("Invalid option. Please select 1, 2, or q.")
                     continue
 
                 # Ask if user wants to continue or quit
