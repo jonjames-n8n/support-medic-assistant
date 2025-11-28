@@ -6,24 +6,54 @@ All notable changes to the Support Medic Assistant Tool will be documented in th
 
 ### New Features
 
-- **OOM Investigation** (Database Troubleshooting → Option 9)
-  - Automatic analysis of database metrics (size, executions, active workflows)
-  - Top workflows by execution count (last 24h)
-  - Workflows with recent errors (last 24h)
-  - Execution queue status (pending/waiting/running)
-  - Execution growth over last 7 days
-  - "Likely culprits" analysis with actionable recommendations
-    - High execution volume detection (>500 executions/24h)
-    - Pending backlog warning (>100 pending)
-    - Large database detection (>200 MB)
-    - Error-prone workflow identification (>50 errors/24h)
-  - kubectl commands for manual Grafana/log investigation
+- **OOM Investigation with Report Generation** (Database Troubleshooting → Option 9)
+  - **Deep Database Analysis:**
+    - Database metrics (size, executions, active workflows)
+    - Table size breakdown with bloat detection
+    - Largest executions by data size
+    - Workflows with most stored data (active vs inactive)
+    - Top workflows by execution count (last 24h)
+    - Workflows with recent errors (last 24h)
+    - Execution queue status (pending/waiting/running)
+    - Execution growth trends (last 7 days)
+  - **Intelligent Analysis:**
+    - "Likely culprits" identification with thresholds:
+      - Table bloat detection (execution_data > 100MB)
+      - Inactive workflow data (> 10MB inactive workflows)
+      - Large individual executions (> 10MB each)
+      - Pending backlog warning (> 100 pending)
+      - Large database (> 200MB)
+    - Actionable recommendations for each issue
+  - **Report Generation:**
+    - Downloadable Markdown report to ~/Downloads
+    - Comprehensive findings summary
+    - SQL commands for data pruning
+    - kubectl commands for manual investigation
+    - Customer-facing recommendations
 
 ### Technical Changes
 
 - Added `run_db_query_rows()` helper method for multi-row SQL queries
 - Added `print_section_header()` helper method for formatted output
+- Added `format_bytes()` for human-readable size formatting
+- Added database analysis methods:
+  - `get_database_size()` - Get database file size
+  - `get_table_sizes()` - Table size breakdown (uses dbstat with fallback)
+  - `get_largest_executions()` - Find largest execution data
+  - `get_workflow_data_sizes()` - Total stored data per workflow
+  - `get_top_workflows_24h()` - Top workflows by execution count
+  - `get_error_workflows_24h()` - Error-prone workflows
+  - `get_execution_growth()` - 7-day execution trends
+- Added analysis methods:
+  - `analyze_oom_culprits()` - Intelligent root cause analysis
+  - `print_recommended_actions()` - Display actionable recommendations
+  - `generate_oom_report()` - Create downloadable Markdown report
 - Database troubleshooting menu now has 11 options (moved "Back to main menu" to option 11)
+
+### Bug Fixes
+
+- Fixed SQL escaping issues in complex queries (removed incorrect shell escaping)
+- Fixed `run_db_query_rows()` invalid parameter error
 
 ---
 

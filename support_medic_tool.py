@@ -981,32 +981,303 @@ ORDER BY count DESC;
     # ============================================================
 
     def investigate_oom(self):
-        """Investigate OOM (Out of Memory) crash causes"""
+        """Investigate OOM (Out of Memory) crash causes with deep database analysis"""
         self.print_header("OOM INVESTIGATION")
 
         print("Gathering data... please wait.\n")
 
+        # Initialize report data
+        report_data = {
+            'workspace': self.workspace,
+            'cluster': self.cluster,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'pod_name': self.pod_name
+        }
+
         # 1. DATABASE METRICS
         self.print_section_header("📊 DATABASE METRICS")
 
-        # Database size
-        size_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
-        db_size = self.run_command(size_cmd)
-
-        # Total executions
+        db_size = self.get_database_size()
         total_exec = self.run_db_query("SELECT COUNT(*) FROM execution_entity;")
-
-        # Active workflows
         active_wf = self.run_db_query("SELECT COUNT(*) FROM workflow_entity WHERE active = 1;")
 
         print(f"Database Size:        {db_size or 'Unknown'}")
         print(f"Total Executions:     {total_exec or 'Unknown'}")
         print(f"Active Workflows:     {active_wf or 'Unknown'}")
 
-        # 2. TOP WORKFLOWS BY EXECUTION COUNT
+        report_data['db_size'] = db_size
+        report_data['total_exec'] = total_exec
+        report_data['active_wf'] = active_wf
+
+        # 2. TABLE SIZE BREAKDOWN
+        self.print_section_header("💾 TABLE SIZE BREAKDOWN")
+
+        table_sizes = self.get_table_sizes()
+        report_data['table_sizes'] = table_sizes
+
+        print(f"{'Table':<35} {'Size':<15}")
+        print("─" * 50)
+
+        if table_sizes:
+            for table_name, size_bytes in table_sizes[:5]:
+                size_str = self.format_bytes(size_bytes)
+                warning = "  ⚠️  BLOATED" if size_bytes > 100_000_000 else ""  # > 100MB
+                print(f"{table_name:<35} {size_str:<15}{warning}")
+        else:
+            print("Could not retrieve table sizes")
+
+        # 3. LARGEST EXECUTIONS
+        self.print_section_header("📦 LARGEST EXECUTIONS (by data size)")
+
+        largest_execs = self.get_largest_executions()
+        report_data['largest_execs'] = largest_execs
+
+        print(f"{'Exec ID':<10} {'Workflow':<35} {'Data Size':<12}")
+        print("─" * 60)
+
+        if largest_execs:
+            for exec_id, wf_name, data_size in largest_execs[:5]:
+                wf_display = wf_name[:33] + '..' if len(wf_name) > 35 else wf_name
+                size_str = self.format_bytes(int(data_size))
+                print(f"{exec_id:<10} {wf_display:<35} {size_str:<12}")
+        else:
+            print("No execution data found")
+
+        # 4. WORKFLOWS WITH LARGEST STORED DATA
+        self.print_section_header("🔍 WORKFLOWS WITH LARGEST STORED DATA")
+
+        workflow_data = self.get_workflow_data_sizes()
+        report_data['workflow_data'] = workflow_data
+
+        print(f"{'Workflow ID':<20} {'Name':<28} {'Total Size':<12} {'Active?':<8}")
+        print("─" * 70)
+
+        if workflow_data:
+            for wf_id, wf_name, total_size, exec_count, active in workflow_data[:5]:
+                wf_display = wf_name[:26] + '..' if len(wf_name) > 28 else wf_name
+                size_str = self.format_bytes(int(total_size))
+                active_str = "✓ YES" if active == 1 else "❌ NO"
+                print(f"{wf_id:<20} {wf_display:<28} {size_str:<12} {active_str:<8}")
+        else:
+            print("No workflow data found")
+
+        # 5. TOP WORKFLOWS BY EXECUTION COUNT (24h)
         self.print_section_header("🔥 TOP WORKFLOWS BY EXECUTION COUNT (Last 24h)")
 
-        top_workflows_sql = """
+        top_workflows = self.get_top_workflows_24h()
+        report_data['top_workflows'] = top_workflows
+
+        print(f"{'ID':<20} {'Name':<30} {'Executions':<10}")
+        print("─" * 62)
+
+        if top_workflows:
+            for wf_id, name, count in top_workflows:
+                name_display = name[:28] + '..' if len(name) > 30 else name
+                print(f"{wf_id:<20} {name_display:<30} {count:<10}")
+        else:
+            print("No executions in the last 24 hours")
+
+        # 6. WORKFLOWS WITH ERRORS (24h)
+        self.print_section_header("⚠️  WORKFLOWS WITH RECENT ERRORS (Last 24h)")
+
+        error_workflows = self.get_error_workflows_24h()
+        report_data['error_workflows'] = error_workflows
+
+        print(f"{'ID':<20} {'Name':<30} {'Errors':<10}")
+        print("─" * 62)
+
+        if error_workflows:
+            for wf_id, name, count in error_workflows:
+                name_display = name[:28] + '..' if len(name) > 30 else name
+                print(f"{wf_id:<20} {name_display:<30} {count:<10}")
+        else:
+            print("No workflow errors in the last 24 hours")
+
+        # 7. EXECUTION QUEUE STATUS
+        self.print_section_header("⏳ EXECUTION QUEUE STATUS")
+
+        pending = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'new';") or '0'
+        waiting = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'waiting';") or '0'
+        running = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'running';") or '0'
+
+        pending_int = int(pending)
+        pending_warning = " ⚠️  HIGH - may cause memory pressure" if pending_int > 100 else ""
+
+        print(f"Pending ('new'):      {pending}{pending_warning}")
+        print(f"Waiting:              {waiting}")
+        print(f"Running:              {running}")
+
+        report_data['pending'] = pending
+        report_data['waiting'] = waiting
+        report_data['running'] = running
+
+        # 8. EXECUTION GROWTH (7 days)
+        self.print_section_header("📈 EXECUTION GROWTH (Last 7 Days)")
+
+        growth_data = self.get_execution_growth()
+        report_data['growth_data'] = growth_data
+
+        print(f"{'Date':<15} {'Executions':<10}")
+        print("─" * 25)
+
+        if growth_data:
+            for day, count in growth_data:
+                print(f"{day:<15} {count:<10}")
+        else:
+            print("No execution data available")
+
+        # 9. LIKELY CULPRITS ANALYSIS
+        self.print_section_header("🎯 LIKELY CULPRITS")
+
+        culprits = self.analyze_oom_culprits(report_data)
+        report_data['culprits'] = culprits
+
+        if culprits:
+            for i, culprit in enumerate(culprits, 1):
+                print()
+                print(f"{i}. ⚠️  {culprit['title']}")
+                print(f"   → {culprit['description']}")
+                print(f"   → Recommendation: {culprit['recommendation']}")
+        else:
+            print("\nNo obvious culprits detected from database analysis.")
+            print("Check Grafana memory metrics for runtime memory spikes.")
+
+        # 10. RECOMMENDED ACTIONS
+        self.print_section_header("📋 RECOMMENDED ACTIONS")
+
+        self.print_recommended_actions(report_data)
+
+        # 11. MANUAL CHECKS
+        self.print_section_header("📋 MANUAL CHECKS (Grafana / kubectl)")
+
+        print("\n# Pod events (OOMKill timestamps)")
+        print(f"kubectl describe pod {self.pod_name} -n {self.workspace} | grep -A 15 Events\n")
+        print("# Logs before crash")
+        print(f"kubectl logs {self.pod_name} -n {self.workspace} -c n8n --previous --tail=100\n")
+        print("# Current memory usage")
+        print(f"kubectl top pod {self.pod_name} -n {self.workspace}\n")
+
+        # 12. GENERATE REPORT
+        print("═" * 65)
+        generate = self.get_input("\nGenerate report? (y/n): ").lower()
+
+        if generate == 'y':
+            report_path = self.generate_oom_report(report_data)
+            self.print_success(f"Report saved to: {report_path}")
+
+        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+
+
+    # OOM Investigation Helper Methods
+
+    def format_bytes(self, bytes_val):
+        """Format bytes to human readable string"""
+        try:
+            bytes_val = int(bytes_val)
+            if bytes_val >= 1_000_000_000:
+                return f"{bytes_val / 1_000_000_000:.1f} GB"
+            elif bytes_val >= 1_000_000:
+                return f"{bytes_val / 1_000_000:.1f} MB"
+            elif bytes_val >= 1_000:
+                return f"{bytes_val / 1_000:.1f} KB"
+            else:
+                return f"{bytes_val} B"
+        except (ValueError, TypeError):
+            return "Unknown"
+
+    def get_database_size(self):
+        """Get database file size"""
+        cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite 2>/dev/null | awk '{{print $1}}'"
+        return self.run_command(cmd)
+
+    def get_table_sizes(self):
+        """Get sizes of database tables"""
+        # Try using dbstat first
+        sql = "SELECT name, SUM(pgsize) as size FROM dbstat GROUP BY name ORDER BY size DESC LIMIT 10;"
+        result = self.run_db_query_rows(sql)
+
+        if result and len(result) > 0:
+            tables = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 2:
+                    try:
+                        tables.append((parts[0], int(parts[1])))
+                    except ValueError:
+                        continue
+            if tables:
+                return tables
+
+        # Fallback: estimate execution_data size
+        sql_fallback = "SELECT 'execution_data' as name, SUM(LENGTH(data)) as size FROM execution_data;"
+        result = self.run_db_query_rows(sql_fallback)
+        if result:
+            parts = result[0].split('|')
+            if len(parts) == 2:
+                try:
+                    return [('execution_data', int(parts[1]))]
+                except ValueError:
+                    pass
+
+        return []
+
+    def get_largest_executions(self):
+        """Get largest executions by data size"""
+        sql = """
+        SELECT
+            ed.executionId,
+            COALESCE(w.name, 'Unknown') as workflow_name,
+            LENGTH(ed.data) as data_size
+        FROM execution_data ed
+        LEFT JOIN execution_entity e ON ed.executionId = e.id
+        LEFT JOIN workflow_entity w ON e.workflowId = w.id
+        ORDER BY data_size DESC
+        LIMIT 10;
+        """
+        result = self.run_db_query_rows(sql)
+
+        if result:
+            execs = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 3:
+                    execs.append((parts[0], parts[1], parts[2]))
+            return execs
+        return []
+
+    def get_workflow_data_sizes(self):
+        """Get total stored data per workflow"""
+        sql = """
+        SELECT
+            e.workflowId,
+            COALESCE(w.name, 'Unknown') as workflow_name,
+            SUM(LENGTH(ed.data)) as total_size,
+            COUNT(*) as exec_count,
+            COALESCE(w.active, 0) as active
+        FROM execution_entity e
+        JOIN execution_data ed ON e.id = ed.executionId
+        LEFT JOIN workflow_entity w ON e.workflowId = w.id
+        GROUP BY e.workflowId
+        ORDER BY total_size DESC
+        LIMIT 10;
+        """
+        result = self.run_db_query_rows(sql)
+
+        if result:
+            workflows = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 5:
+                    try:
+                        workflows.append((parts[0], parts[1], parts[2], parts[3], int(parts[4])))
+                    except ValueError:
+                        continue
+            return workflows
+        return []
+
+    def get_top_workflows_24h(self):
+        """Get top workflows by execution count in last 24h"""
+        sql = """
         SELECT
             e.workflowId,
             COALESCE(w.name, 'Unknown') as name,
@@ -1018,25 +1289,20 @@ ORDER BY count DESC;
         ORDER BY exec_count DESC
         LIMIT 5;
         """
+        result = self.run_db_query_rows(sql)
 
-        top_workflows = self.run_db_query_rows(top_workflows_sql)
+        if result:
+            workflows = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 3:
+                    workflows.append((parts[0], parts[1], parts[2]))
+            return workflows
+        return []
 
-        print(f"{'ID':<20} {'Name':<30} {'Executions':<10}")
-        print("─" * 62)
-
-        if top_workflows:
-            for row in top_workflows:
-                wf_id, name, count = row.split('|')
-                # Truncate name if too long
-                name = name[:28] + '..' if len(name) > 30 else name
-                print(f"{wf_id:<20} {name:<30} {count:<10}")
-        else:
-            print("No executions in the last 24 hours")
-
-        # 3. WORKFLOWS WITH ERRORS
-        self.print_section_header("⚠️  WORKFLOWS WITH RECENT ERRORS (Last 24h)")
-
-        error_workflows_sql = """
+    def get_error_workflows_24h(self):
+        """Get workflows with errors in last 24h"""
+        sql = """
         SELECT
             e.workflowId,
             COALESCE(w.name, 'Unknown') as name,
@@ -1050,41 +1316,20 @@ ORDER BY count DESC;
         ORDER BY error_count DESC
         LIMIT 5;
         """
+        result = self.run_db_query_rows(sql)
 
-        error_workflows = self.run_db_query_rows(error_workflows_sql)
+        if result:
+            workflows = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 3:
+                    workflows.append((parts[0], parts[1], parts[2]))
+            return workflows
+        return []
 
-        print(f"{'ID':<20} {'Name':<30} {'Errors':<10}")
-        print("─" * 62)
-
-        if error_workflows:
-            for row in error_workflows:
-                wf_id, name, count = row.split('|')
-                name = name[:28] + '..' if len(name) > 30 else name
-                print(f"{wf_id:<20} {name:<30} {count:<10}")
-        else:
-            print("No workflow errors in the last 24 hours")
-
-        # 4. EXECUTION QUEUE STATUS
-        self.print_section_header("⏳ EXECUTION QUEUE STATUS")
-
-        pending_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'new';")
-        waiting_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'waiting';")
-        running_count = self.run_db_query("SELECT COUNT(*) FROM execution_entity WHERE status = 'running';")
-
-        pending_int = int(pending_count) if pending_count else 0
-        waiting_int = int(waiting_count) if waiting_count else 0
-        running_int = int(running_count) if running_count else 0
-
-        pending_warning = " ⚠️  HIGH - may cause memory pressure" if pending_int > 100 else ""
-
-        print(f"Pending ('new'):      {pending_int}{pending_warning}")
-        print(f"Waiting:              {waiting_int}")
-        print(f"Running:              {running_int}")
-
-        # 5. EXECUTION GROWTH
-        self.print_section_header("📈 EXECUTION GROWTH (Last 7 Days)")
-
-        growth_sql = """
+    def get_execution_growth(self):
+        """Get execution count per day for last 7 days"""
+        sql = """
         SELECT
             date(startedAt) as day,
             COUNT(*) as executions
@@ -1093,129 +1338,239 @@ ORDER BY count DESC;
         GROUP BY date(startedAt)
         ORDER BY day DESC;
         """
+        result = self.run_db_query_rows(sql)
 
-        growth_data = self.run_db_query_rows(growth_sql)
+        if result:
+            growth = []
+            for row in result:
+                parts = row.split('|')
+                if len(parts) == 2:
+                    growth.append((parts[0], parts[1]))
+            return growth
+        return []
 
-        print(f"{'Date':<15} {'Executions':<10}")
-        print("─" * 25)
-
-        if growth_data:
-            for row in growth_data:
-                day, count = row.split('|')
-                print(f"{day:<15} {count:<10}")
-        else:
-            print("No execution data available")
-
-        # 6. LIKELY CULPRITS ANALYSIS
-        self.print_section_header("🎯 LIKELY CULPRITS")
-
+    def analyze_oom_culprits(self, data):
+        """Analyze data and identify likely OOM causes"""
         culprits = []
 
-        # Check for high execution volume workflow
-        if top_workflows:
-            first_wf = top_workflows[0].split('|')
-            wf_id, wf_name, exec_count = first_wf[0], first_wf[1], int(first_wf[2])
+        # Check for bloated execution_data table
+        if data.get('table_sizes'):
+            for table_name, size in data['table_sizes']:
+                if table_name == 'execution_data' and size > 100_000_000:  # > 100MB
+                    pct = (size / (int(data.get('db_size_bytes', size)) or size)) * 100 if data.get('db_size_bytes') else 0
+                    culprits.append({
+                        'title': f'DATABASE BLOAT: execution_data table is {self.format_bytes(size)}',
+                        'description': f'This is {pct:.1f}% of total database size' if pct > 0 else 'Consuming significant database space',
+                        'recommendation': 'Prune old execution data'
+                    })
+                    break
 
-            if exec_count > 500:
-                # Check if this workflow also has errors
-                error_count = 0
-                if error_workflows:
-                    for row in error_workflows:
-                        parts = row.split('|')
-                        if parts[0] == wf_id:
-                            error_count = int(parts[2])
-                            break
+        # Check for inactive workflows with large data
+        if data.get('workflow_data'):
+            for wf_id, wf_name, total_size, exec_count, active in data['workflow_data']:
+                if active == 0 and int(total_size) > 10_000_000:  # > 10MB and inactive
+                    culprits.append({
+                        'title': f'INACTIVE WORKFLOW DATA: "{wf_name}"',
+                        'description': f'Storing {self.format_bytes(int(total_size))} but workflow is INACTIVE',
+                        'recommendation': 'Delete execution data for this workflow'
+                    })
+                    break  # Only show first one
 
+        # Check for large individual executions
+        if data.get('largest_execs'):
+            large_count = sum(1 for _, _, size in data['largest_execs'] if int(size) > 10_000_000)
+            if large_count > 0:
                 culprits.append({
-                    'type': 'HIGH_EXECUTION_VOLUME',
-                    'workflow_id': wf_id,
-                    'workflow_name': wf_name,
-                    'exec_count': exec_count,
-                    'error_count': error_count
+                    'title': f'LARGE EXECUTIONS: {large_count} executions over 10 MB each',
+                    'description': 'Workflows storing large binary data in execution history',
+                    'recommendation': 'Enable "Save Data on Error Only" for data-heavy workflows'
                 })
 
         # Check for pending backlog
-        if pending_int > 100:
+        pending = int(data.get('pending', 0))
+        if pending > 100:
             culprits.append({
-                'type': 'PENDING_BACKLOG',
-                'count': pending_int
+                'title': f'PENDING EXECUTION BACKLOG: {pending} pending',
+                'description': 'These pile up and consume memory on startup',
+                'recommendation': 'Cancel pending executions (Main Menu → Option 7)'
             })
 
         # Check for large database
+        db_size = data.get('db_size', '')
         if db_size:
-            # Parse size (e.g., "245M" or "1.2G")
             size_str = db_size.strip()
-            size_num = float(size_str[:-1]) if size_str else 0
-            size_unit = size_str[-1] if size_str else 'M'
-
-            size_mb = size_num if size_unit == 'M' else size_num * 1024 if size_unit == 'G' else size_num / 1024
-
-            if size_mb > 200:
-                culprits.append({
-                    'type': 'LARGE_DATABASE',
-                    'size': db_size
-                })
-
-        # Check for error-prone workflow
-        if error_workflows:
-            first_error_wf = error_workflows[0].split('|')
-            err_wf_id, err_wf_name, err_count = first_error_wf[0], first_error_wf[1], int(first_error_wf[2])
-
-            if err_count > 50:
-                # Only add if not already added as high execution volume
-                already_added = any(c.get('workflow_id') == err_wf_id for c in culprits)
-                if not already_added:
+            try:
+                if size_str.endswith('G') or (size_str.endswith('M') and float(size_str[:-1]) > 200):
                     culprits.append({
-                        'type': 'ERROR_PRONE_WORKFLOW',
-                        'workflow_id': err_wf_id,
-                        'workflow_name': err_wf_name,
-                        'error_count': err_count
+                        'title': f'DATABASE SIZE: {db_size}',
+                        'description': 'Large databases slow down startup and queries',
+                        'recommendation': 'Consider pruning old executions'
                     })
+            except ValueError:
+                pass
 
-        # Display culprits
-        if culprits:
-            for i, culprit in enumerate(culprits, 1):
-                print()
-                if culprit['type'] == 'HIGH_EXECUTION_VOLUME':
-                    print(f"{i}. ⚠️  HIGH EXECUTION VOLUME: \"{culprit['workflow_name']}\" ({culprit['workflow_id']})")
-                    error_msg = f" with {culprit['error_count']} errors" if culprit['error_count'] > 0 else ""
-                    print(f"   → {culprit['exec_count']} executions in 24h{error_msg}")
-                    print(f"   → Recommendation: Check if processing large data payloads")
-                    if culprit['error_count'] > 0:
-                        print(f"   → Recommendation: Review for infinite loops or retries")
+        return culprits
 
-                elif culprit['type'] == 'PENDING_BACKLOG':
-                    print(f"{i}. ⚠️  PENDING EXECUTION BACKLOG: {culprit['count']} pending")
-                    print(f"   → These pile up and consume memory on startup")
-                    print(f"   → Recommendation: Cancel pending executions (Main Menu → Option 7)")
+    def print_recommended_actions(self, data):
+        """Print recommended actions based on analysis"""
+        print()
 
-                elif culprit['type'] == 'LARGE_DATABASE':
-                    print(f"{i}. ⚠️  DATABASE SIZE: {culprit['size']}")
-                    print(f"   → Large databases slow down startup and queries")
-                    print(f"   → Recommendation: Consider pruning old executions")
+        # Inactive workflows with data to prune
+        if data.get('workflow_data'):
+            inactive_with_data = [(wf_id, wf_name, total_size) for wf_id, wf_name, total_size, _, active
+                                  in data['workflow_data'] if active == 0 and int(total_size) > 1_000_000]
 
-                elif culprit['type'] == 'ERROR_PRONE_WORKFLOW':
-                    print(f"{i}. ⚠️  ERROR-PRONE WORKFLOW: \"{culprit['workflow_name']}\" ({culprit['workflow_id']})")
-                    print(f"   → {culprit['error_count']} errors in last 24h")
-                    print(f"   → Recommendation: Workflow may be retrying repeatedly, consuming memory")
+            if inactive_with_data:
+                print("1. Delete execution data for inactive workflows:\n")
+                for wf_id, wf_name, total_size in inactive_with_data[:3]:
+                    print(f"   Workflow: {wf_name} ({wf_id})")
+                    print(f"   Data size: {self.format_bytes(int(total_size))}\n")
+
+        print("2. Advise customer to change workflow settings:")
+        print("   - Set 'Save Successful Executions' to limited retention")
+        print("   - Use 'Save Data on Error Only' for data-heavy workflows")
+        print("   - Avoid storing large binary data in workflow outputs")
+
+    def generate_oom_report(self, data):
+        """Generate markdown report file"""
+        timestamp = datetime.now().strftime('%Y-%m-%d')
+        filename = f"{self.workspace}-oom-report-{timestamp}.md"
+        filepath = self.downloads_dir / filename
+
+        report = f"""# OOM Investigation Report
+
+**Instance:** {data['workspace']}
+**Cluster:** {data.get('cluster', 'Unknown')}
+**Generated:** {data['timestamp']}
+**Generated by:** Cloud Medic Tool v1.4
+
+---
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Database Size | {data.get('db_size', 'Unknown')} |
+| Total Executions | {data.get('total_exec', 'Unknown')} |
+| Active Workflows | {data.get('active_wf', 'Unknown')} |
+
+---
+
+## Table Size Breakdown
+
+| Table | Size |
+|-------|------|
+"""
+
+        if data.get('table_sizes'):
+            for table_name, size in data['table_sizes'][:5]:
+                report += f"| {table_name} | {self.format_bytes(size)} |\n"
         else:
-            print("\nNo obvious culprits detected from database analysis.")
-            print("Check Grafana memory metrics for runtime memory spikes.")
+            report += "| No data | - |\n"
 
-        # 7. MANUAL CHECKS
-        self.print_section_header("📋 MANUAL CHECKS (Grafana / kubectl)")
+        report += """
+---
 
-        print("\nRun these commands for additional context:\n")
-        print("# Memory usage over time (check Grafana)")
-        print("Dashboard: n8n Cloud → Instance Metrics → Memory\n")
-        print("# Pod events (OOMKill timestamps)")
-        print(f"kubectl describe pod {self.pod_name} -n {self.workspace} | grep -A 15 Events\n")
-        print("# Logs before crash")
-        print(f"kubectl logs {self.pod_name} -c n8n --previous --tail=100\n")
-        print("# Current memory usage")
-        print(f"kubectl top pod {self.pod_name} -n {self.workspace}\n")
+## Largest Executions
 
-        input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+| Exec ID | Workflow | Data Size |
+|---------|----------|-----------|
+"""
+
+        if data.get('largest_execs'):
+            for exec_id, wf_name, data_size in data['largest_execs'][:5]:
+                report += f"| {exec_id} | {wf_name} | {self.format_bytes(int(data_size))} |\n"
+        else:
+            report += "| No data | - | - |\n"
+
+        report += """
+---
+
+## Workflows with Most Stored Data
+
+| Workflow ID | Name | Total Size | Active? |
+|-------------|------|------------|---------|
+"""
+
+        if data.get('workflow_data'):
+            for wf_id, wf_name, total_size, exec_count, active in data['workflow_data'][:5]:
+                active_str = "Yes" if active == 1 else "No"
+                report += f"| {wf_id} | {wf_name} | {self.format_bytes(int(total_size))} | {active_str} |\n"
+        else:
+            report += "| No data | - | - | - |\n"
+
+        report += """
+---
+
+## Likely Culprits
+
+"""
+
+        if data.get('culprits'):
+            for i, culprit in enumerate(data['culprits'], 1):
+                report += f"{i}. **{culprit['title']}**\n"
+                report += f"   - {culprit['description']}\n"
+                report += f"   - Recommendation: {culprit['recommendation']}\n\n"
+        else:
+            report += "No obvious culprits detected from database analysis.\n\n"
+
+        report += f"""
+---
+
+## Recommended Actions
+
+### For Support Team
+
+"""
+
+        if data.get('workflow_data'):
+            inactive_with_data = [(wf_id, wf_name, total_size) for wf_id, wf_name, total_size, _, active
+                                  in data['workflow_data'] if active == 0 and int(total_size) > 1_000_000]
+
+            if inactive_with_data:
+                report += "**Prune execution data for inactive workflows:**\n\n"
+                report += "```sql\n"
+                for wf_id, wf_name, _ in inactive_with_data[:3]:
+                    report += f"-- Delete data for: {wf_name}\n"
+                    report += f"DELETE FROM execution_data WHERE executionId IN (\n"
+                    report += f"  SELECT id FROM execution_entity WHERE workflowId = '{wf_id}'\n"
+                    report += f");\n"
+                    report += f"DELETE FROM execution_entity WHERE workflowId = '{wf_id}';\n\n"
+                report += "VACUUM;\n"
+                report += "```\n\n"
+
+        report += """### For Customer
+
+1. **Review workflow execution settings:**
+   - Set "Save Successful Executions" to limited retention (e.g., last 10)
+   - Enable "Save Data on Error Only" for data-heavy workflows
+
+2. **Avoid storing large data in execution results:**
+   - Process files without keeping them in n8n memory
+   - Use external storage for large outputs
+
+---
+
+## Technical Details
+
+### kubectl Commands
+
+```bash
+# Pod events (OOMKill timestamps)
+"""
+
+        report += f"kubectl describe pod {data.get('pod_name', 'POD_NAME')} -n {data['workspace']} | grep -A 15 Events\n\n"
+        report += "# Previous logs\n"
+        report += f"kubectl logs {data.get('pod_name', 'POD_NAME')} -n {data['workspace']} -c n8n --previous --tail=100\n\n"
+        report += "# Current memory\n"
+        report += f"kubectl top pod {data.get('pod_name', 'POD_NAME')} -n {data['workspace']}\n"
+        report += "```\n\n"
+        report += "---\n\n*Report generated by Cloud Medic Tool v1.4*\n"
+
+        with open(filepath, 'w') as f:
+            f.write(report)
+
+        return str(filepath)
 
     # ============================================================
     # Feature 2: Log Download Menu
