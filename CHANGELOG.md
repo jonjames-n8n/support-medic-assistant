@@ -2,6 +2,52 @@
 
 All notable changes to the Support Medic Assistant Tool will be documented in this file.
 
+## v1.4.1 (2025-11-28)
+
+### Menu Reorganization
+
+- **Main Menu Restructured** - Replaced flat menu with 7 category submenus:
+  - Health & Diagnostics (health check, execution status, storage diagnostics)
+  - Workflow Operations (export, import, deactivate)
+  - Execution Management (check, cancel, clear queued)
+  - Database & Storage (backup, troubleshooting, prune binary data)
+  - User & Access (2FA, owner email)
+  - Logs (view, download)
+  - Settings (workspace/cluster, redeploy)
+- **Pre-Menu Enhancement** - Added quit option ('q') to operation mode selection
+- All submenus support 'b' to go back to main menu
+
+### New Features
+
+- **Storage Diagnostics** (Health & Diagnostics → Option 3)
+  - Disk usage analysis
+  - Database size with table breakdown
+  - Execution counts by status and last 7 days
+  - Binary data analysis with size metrics
+  - Top workflows by stored data (active vs inactive)
+  - Intelligent recommendations for storage cleanup
+
+- **Clear Queued Executions** (Execution Management → Option 4)
+  - Clear all executions with status='new'
+  - Preview up to 5 queued executions before clearing
+  - Automatic backup before operation
+  - Verification after clearing
+
+- **Prune Binary Data** (Database & Storage → Option 3)
+  - Trigger bfp-9000 sidecar to prune old execution data
+  - Shows current binary data usage before pruning
+  - Sends SIGUSR1 signal to bfp-9000 container
+  - Background operation with progress monitoring guidance
+
+### Improvements
+
+- Better menu organization for easier navigation
+- Category-based grouping of related operations
+- Consistent 'b' back option across all submenus
+- Pod requirement checks in each submenu
+
+---
+
 ## v1.4 (2025-11-28)
 
 ### New Features
