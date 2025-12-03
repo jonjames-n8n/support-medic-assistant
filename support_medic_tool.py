@@ -372,45 +372,51 @@ class CloudMedicTool:
         input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def show_main_menu(self):
-        """Display main menu with category submenus"""
+        """Display main menu with category submenus (v1.4.2 - Health Check is direct action)"""
         while True:
             self.print_header("Main Menu")
             print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
             print(f"{Colors.BOLD}Cluster:{Colors.END} {self.cluster}")
             print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
 
-            menu_options = [
-                ("1", "Health & Diagnostics", self.menu_health_diagnostics),
-                ("2", "Workflow Operations", self.menu_workflow_operations),
-                ("3", "Execution Management", self.menu_execution_management),
-                ("4", "Database & Storage", self.menu_database_storage),
-                ("5", "User & Access", self.menu_user_access),
-                ("6", "Logs", self.menu_logs),
-                ("7", "Settings", self.menu_settings),
-                ("q", "Quit", None)
-            ]
-
-            for key, description, _ in menu_options:
-                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+            # v1.4.2: Option 1 is now a direct action (Health Check), not a submenu
+            print(f"{Colors.GREEN}1.{Colors.END} 🩺 Health Check")
+            print(f"{Colors.GREEN}2.{Colors.END} 📦 Workflow Operations")
+            print(f"{Colors.GREEN}3.{Colors.END} ⚡ Execution Management")
+            print(f"{Colors.GREEN}4.{Colors.END} 💾 Database & Storage")
+            print(f"{Colors.GREEN}5.{Colors.END} 👤 User & Access")
+            print(f"{Colors.GREEN}6.{Colors.END} 📋 Logs")
+            print(f"{Colors.GREEN}7.{Colors.END} ⚙️  Settings")
+            print(f"\n{Colors.GREEN}q.{Colors.END} Quit")
 
             print()
             choice = self.get_input("Select an option: ", required=False)
 
-            # Find and execute the selected option
-            for key, _, func in menu_options:
-                if choice == key:
-                    if func:
-                        func()
-                    else:
-                        return False  # Quit selected
-                    break
-            else:
-                if choice:
-                    self.print_error("Invalid option. Please try again.")
+            # Handle menu selections
+            if choice == '1':
+                # v1.4.2: Health Check is a direct action
+                if not self.pod_name:
+                    self.print_error("Health check requires a valid pod")
                     input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
-
-            if choice == 'q':
+                else:
+                    self.health_check()
+            elif choice == '2':
+                self.menu_workflow_operations()
+            elif choice == '3':
+                self.menu_execution_management()
+            elif choice == '4':
+                self.menu_database_storage()
+            elif choice == '5':
+                self.menu_user_access()
+            elif choice == '6':
+                self.menu_logs()
+            elif choice == '7':
+                self.menu_settings()
+            elif choice == 'q':
                 return False
+            elif choice:
+                self.print_error("Invalid option. Please try again.")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
         return True
 
@@ -541,16 +547,17 @@ class CloudMedicTool:
                     input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def menu_database_storage(self):
-        """Database & Storage submenu"""
+        """Database & Storage submenu (v1.4.2 spec)"""
         while True:
             self.print_header("Database & Storage")
             print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
             print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
 
             menu_options = [
-                ("1", "Take backup", self.take_backup),
-                ("2", "Database troubleshooting (guided)", self.database_troubleshooting),
+                ("1", "Database troubleshooting (guided)", self.database_troubleshooting),
+                ("2", "Storage diagnostics", self.storage_diagnostics),
                 ("3", "Prune binary data", self.prune_binary_data),
+                ("4", "Take backup", self.take_backup),
                 ("b", "Back to main menu", None)
             ]
 
