@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Cloud Medic Assistant Tool v1.4.1
+Cloud Medic Assistant Tool v1.4.2
 Interactive CLI for n8n Cloud Support operations
+
+Changelog v1.4.2:
+- Added configurable backup list limit (20/50/100/all)
+- Health Check now runs directly from main menu (no submenu)
+- Removed emoji icons from menu for cleaner output
+- Fixed: Storage Diagnostics database size display (uses du -sh)
+- Fixed: Storage Diagnostics tuple error on execution growth (Last 7 Days)
+- Fixed: Prune Binary Data now shows actionable enable instructions
+- Fixed: OOM Investigation database size display (uses du -sh)
+- Fixed: OOM Investigation handles query timeouts gracefully (120s timeout)
+- Fixed: Deactivate Workflow now shows error details and verifies changes
 
 Changelog v1.4.1:
 - Menu reorganization: Main menu now uses 7 category submenus
 - Added quit option ('q') to pre-menu
-- New feature: Storage Diagnostics (Health & Diagnostics → Option 3)
+- New feature: Storage Diagnostics (Database & Storage → Option 2)
 - New feature: Clear Queued Executions (Execution Management → Option 4)
 - New feature: Prune Binary Data (Database & Storage → Option 3)
 
@@ -157,8 +168,13 @@ class CloudMedicTool:
                 return self.run_db_query(sql_cmd, show_error_details=False)
             return None
 
-    def run_db_query_rows(self, sql_query):
-        """Run SQL query and return list of rows (pipe-separated)"""
+    def run_db_query_rows(self, sql_query, timeout=30):
+        """Run SQL query and return list of rows (pipe-separated)
+
+        Args:
+            sql_query: SQL query to execute
+            timeout: Timeout in seconds (default 30, use 120 for complex queries)
+        """
         # Use stdin piping to avoid shell escaping issues
         cmd = [
             'kubectl', 'exec', '-i',
@@ -173,11 +189,15 @@ class CloudMedicTool:
                 input=sql_query,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=timeout
             )
 
             if result.returncode == 0 and result.stdout.strip():
                 return [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+            return []
+        except subprocess.TimeoutExpired:
+            self.print_warning(f"Query timed out after {timeout} seconds - database may be too large")
+            print("Consider running query manually: sqlite3 database.sqlite 'YOUR_QUERY'")
             return []
         except Exception as e:
             self.print_error(f"Query failed: {e}")
@@ -196,6 +216,23 @@ class CloudMedicTool:
         response = input(f"{Colors.YELLOW}{message} (y/n): {Colors.END}").strip().lower()
         return response in ['y', 'yes']
 
+    def get_backup_limit(self):
+        """Prompt user for number of backups to display"""
+        print("\nHow many backups to display? [20/50/100/all]")
+        choice = self.get_input("Enter choice (default 20): ", required=False).strip().lower()
+
+        if choice == '' or choice == '20':
+            return '20'
+        elif choice == '50':
+            return '50'
+        elif choice == '100':
+            return '100'
+        elif choice == 'all':
+            return 'all'
+        else:
+            self.print_warning("Invalid choice, using default (20)")
+            return '20'
+
     def find_pod(self):
         """Find pod name for current workspace"""
         pod_cmd = f"kubectl get pods -n {self.workspace} -o jsonpath='{{.items[0].metadata.name}}'"
@@ -204,6 +241,7 @@ class CloudMedicTool:
 
     def setup_workspace(self):
         """Get workspace name and cluster information"""
+        self.print_header("Cloud Medic Assistant - Setup v1.4.2")
         self.print_header("Cloud Medic Assistant - Setup v1.4.1")
 
         # VPN reminder
@@ -347,45 +385,51 @@ class CloudMedicTool:
         input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def show_main_menu(self):
-        """Display main menu with category submenus"""
+        """Display main menu with category submenus (v1.4.2 - Health Check is direct action)"""
         while True:
             self.print_header("Main Menu")
             print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
             print(f"{Colors.BOLD}Cluster:{Colors.END} {self.cluster}")
             print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
 
-            menu_options = [
-                ("1", "Health & Diagnostics", self.menu_health_diagnostics),
-                ("2", "Workflow Operations", self.menu_workflow_operations),
-                ("3", "Execution Management", self.menu_execution_management),
-                ("4", "Database & Storage", self.menu_database_storage),
-                ("5", "User & Access", self.menu_user_access),
-                ("6", "Logs", self.menu_logs),
-                ("7", "Settings", self.menu_settings),
-                ("q", "Quit", None)
-            ]
-
-            for key, description, _ in menu_options:
-                print(f"{Colors.GREEN}{key}.{Colors.END} {description}")
+            # v1.4.2: Option 1 is now a direct action (Health Check), not a submenu
+            print(f"{Colors.GREEN}1.{Colors.END} Health Check")
+            print(f"{Colors.GREEN}2.{Colors.END} Workflow Operations")
+            print(f"{Colors.GREEN}3.{Colors.END} Execution Management")
+            print(f"{Colors.GREEN}4.{Colors.END} Database & Storage")
+            print(f"{Colors.GREEN}5.{Colors.END} User & Access")
+            print(f"{Colors.GREEN}6.{Colors.END} Logs")
+            print(f"{Colors.GREEN}7.{Colors.END} Settings")
+            print(f"\n{Colors.GREEN}q.{Colors.END} Quit")
 
             print()
             choice = self.get_input("Select an option: ", required=False)
 
-            # Find and execute the selected option
-            for key, _, func in menu_options:
-                if choice == key:
-                    if func:
-                        func()
-                    else:
-                        return False  # Quit selected
-                    break
-            else:
-                if choice:
-                    self.print_error("Invalid option. Please try again.")
+            # Handle menu selections
+            if choice == '1':
+                # v1.4.2: Health Check is a direct action
+                if not self.pod_name:
+                    self.print_error("Health check requires a valid pod")
                     input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
-
-            if choice == 'q':
+                else:
+                    self.health_check()
+            elif choice == '2':
+                self.menu_workflow_operations()
+            elif choice == '3':
+                self.menu_execution_management()
+            elif choice == '4':
+                self.menu_database_storage()
+            elif choice == '5':
+                self.menu_user_access()
+            elif choice == '6':
+                self.menu_logs()
+            elif choice == '7':
+                self.menu_settings()
+            elif choice == 'q':
                 return False
+            elif choice:
+                self.print_error("Invalid option. Please try again.")
+                input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
         return True
 
@@ -516,16 +560,17 @@ class CloudMedicTool:
                     input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
 
     def menu_database_storage(self):
-        """Database & Storage submenu"""
+        """Database & Storage submenu (v1.4.2 spec)"""
         while True:
             self.print_header("Database & Storage")
             print(f"{Colors.BOLD}Workspace:{Colors.END} {self.workspace}")
             print(f"{Colors.BOLD}Pod:{Colors.END} {self.pod_name}\n")
 
             menu_options = [
-                ("1", "Take backup", self.take_backup),
-                ("2", "Database troubleshooting (guided)", self.database_troubleshooting),
+                ("1", "Database troubleshooting (guided)", self.database_troubleshooting),
+                ("2", "Storage diagnostics", self.storage_diagnostics),
                 ("3", "Prune binary data", self.prune_binary_data),
+                ("4", "Take backup", self.take_backup),
                 ("b", "Back to main menu", None)
             ]
 
@@ -780,19 +825,34 @@ class CloudMedicTool:
 
         # 2. Database Size
         self.print_section_header("2. DATABASE SIZE")
-        db_size_bytes = self.get_database_size()
-        if db_size_bytes:
-            print(f"Total: {self.format_bytes(db_size_bytes)}")
 
-            # Show table sizes
-            table_sizes = self.get_table_sizes()
-            if table_sizes:
-                print(f"\n{Colors.BOLD}Table Breakdown:{Colors.END}")
-                for row in table_sizes[:10]:  # Top 10 tables
-                    # row is already a tuple (table_name, size_bytes)
-                    table_name = row[0]
-                    size_bytes = row[1]
-                    print(f"  {table_name}: {self.format_bytes(size_bytes)}")
+        # Try du -sh first for most reliable output
+        db_size_cmd = f"kubectl exec {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite"
+        db_size_result = self.run_command(db_size_cmd)
+
+        db_size_bytes = None
+        if db_size_result:
+            # Display the du output directly
+            print(f"Database: {db_size_result}")
+            # Also try to get bytes for calculations
+            db_size_bytes = self.get_database_size()
+        else:
+            # Fallback to get_database_size
+            db_size_bytes = self.get_database_size()
+            if db_size_bytes:
+                print(f"Database: {self.format_bytes(db_size_bytes)}")
+            else:
+                print("Could not determine database size")
+
+        # Show table sizes
+        table_sizes = self.get_table_sizes()
+        if table_sizes:
+            print(f"\n{Colors.BOLD}Table Breakdown:{Colors.END}")
+            for row in table_sizes[:10]:  # Top 10 tables
+                # row is already a tuple (table_name, size_bytes)
+                table_name = row[0]
+                size_bytes = row[1]
+                print(f"  {table_name}: {self.format_bytes(size_bytes)}")
 
         # 3. Execution Counts
         self.print_section_header("3. EXECUTION COUNTS")
@@ -825,10 +885,10 @@ class CloudMedicTool:
         if growth_data:
             print(f"\n{Colors.BOLD}Last 7 Days:{Colors.END}")
             for row in growth_data:
-                parts = row.split('|')
-                if len(parts) == 2:
-                    date = parts[0].strip()
-                    count = parts[1].strip()
+                # row is a tuple (date, count) from get_execution_growth()
+                if isinstance(row, tuple) and len(row) == 2:
+                    date = str(row[0]).strip()
+                    count = str(row[1]).strip()
                     print(f"  {date}: {count} executions")
 
         # 4. Binary Data
@@ -977,8 +1037,15 @@ class CloudMedicTool:
 
         if not containers or 'bfp-9000' not in containers:
             self.print_error("bfp-9000 container not found in pod")
-            print("\nThis feature requires the bfp-9000 sidecar container.")
-            print("The pod may be using a different binary data pruning mechanism.")
+            print("\nTo enable binary data pruning:\n")
+            print("1. Via Cloudbot (recommended):")
+            print(f"   /cloudbot enable-bfp-9000 {self.workspace}\n")
+            print("2. Or manually via kubectl:")
+            print(f"   kubectl label deployment {self.workspace}-n8n -n {self.workspace} n8n-enable-bfp9000=true\n")
+            print("3. Then redeploy the instance:")
+            print(f"   /cloudbot redeploy-instance {self.workspace}\n")
+            print("After enabling, the bfp-9000 sidecar will automatically prune binary data")
+            print("older than the retention period.")
             input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
             return
 
@@ -1559,15 +1626,26 @@ ORDER BY count DESC;
         # 1. DATABASE METRICS
         self.print_section_header("📊 DATABASE METRICS")
 
-        db_size = self.get_database_size()
+        # Get database size using du -sh for reliable display
+        db_size_cmd = f"kubectl exec {self.pod_name} -n {self.workspace} -c backup-cron -- du -sh database.sqlite"
+        db_size_result = self.run_command(db_size_cmd)
+
+        if db_size_result:
+            # Extract just the size part (e.g., "561M" from "561M    database.sqlite")
+            db_size_display = db_size_result.split()[0] if db_size_result else "Unknown"
+        else:
+            # Fallback to get_database_size() and format it
+            db_size_bytes = self.get_database_size()
+            db_size_display = self.format_bytes(db_size_bytes) if db_size_bytes else "Unknown"
+
         total_exec = self.run_db_query("SELECT COUNT(*) FROM execution_entity;")
         active_wf = self.run_db_query("SELECT COUNT(*) FROM workflow_entity WHERE active = 1;")
 
-        print(f"Database Size:        {db_size or 'Unknown'}")
+        print(f"Database Size:        {db_size_display}")
         print(f"Total Executions:     {total_exec or 'Unknown'}")
         print(f"Active Workflows:     {active_wf or 'Unknown'}")
 
-        report_data['db_size'] = db_size
+        report_data['db_size'] = db_size_display
         report_data['total_exec'] = total_exec
         report_data['active_wf'] = active_wf
 
@@ -1760,9 +1838,9 @@ ORDER BY count DESC;
 
     def get_table_sizes(self):
         """Get sizes of database tables"""
-        # Try using dbstat first
+        # Try using dbstat first (can be slow on large databases)
         sql = "SELECT name, SUM(pgsize) as size FROM dbstat GROUP BY name ORDER BY size DESC LIMIT 10;"
-        result = self.run_db_query_rows(sql)
+        result = self.run_db_query_rows(sql, timeout=120)
 
         if result and len(result) > 0:
             tables = []
@@ -1790,7 +1868,7 @@ ORDER BY count DESC;
         return []
 
     def get_largest_executions(self):
-        """Get largest executions by data size"""
+        """Get largest executions by data size (can be slow on large databases)"""
         sql = """
         SELECT
             ed.executionId,
@@ -1802,7 +1880,7 @@ ORDER BY count DESC;
         ORDER BY data_size DESC
         LIMIT 10;
         """
-        result = self.run_db_query_rows(sql)
+        result = self.run_db_query_rows(sql, timeout=120)
 
         if result:
             execs = []
@@ -1814,7 +1892,7 @@ ORDER BY count DESC;
         return []
 
     def get_workflow_data_sizes(self):
-        """Get total stored data per workflow"""
+        """Get total stored data per workflow (can be slow on large databases)"""
         sql = """
         SELECT
             e.workflowId,
@@ -1829,7 +1907,7 @@ ORDER BY count DESC;
         ORDER BY total_size DESC
         LIMIT 10;
         """
-        result = self.run_db_query_rows(sql)
+        result = self.run_db_query_rows(sql, timeout=120)
 
         if result:
             workflows = []
@@ -2010,6 +2088,7 @@ ORDER BY count DESC;
 **Instance:** {data['workspace']}
 **Cluster:** {data.get('cluster', 'Unknown')}
 **Generated:** {data['timestamp']}
+**Generated by:** Cloud Medic Tool v1.4.2
 **Generated by:** Cloud Medic Tool v1.4.1
 
 ---
@@ -2133,7 +2212,7 @@ ORDER BY count DESC;
         report += "# Current memory\n"
         report += f"kubectl top pod {data.get('pod_name', 'POD_NAME')} -n {data['workspace']}\n"
         report += "```\n\n"
-        report += "---\n\n*Report generated by Cloud Medic Tool v1.4.1*\n"
+        report += "---\n\n*Report generated by Cloud Medic Tool v1.4.2*\n"
 
         with open(filepath, 'w') as f:
             f.write(report)
@@ -2655,9 +2734,18 @@ ORDER BY count DESC;
         self.print_info("Switching to services-gwc-1...")
         self.run_command("kubectx services-gwc-1")
 
+        # Get backup limit from user
+        limit = self.get_backup_limit()
+
+        # Build command with limit
+        if limit == 'all':
+            limit_flag = '--all'
+        else:
+            limit_flag = f'--limit {limit}'
+
         # List backups - capture output to check for errors and get latest
         self.print_info("Listing available backups...")
-        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list {limit_flag}"
         list_result = self.run_command(list_cmd, capture_output=True, check=False)
 
         # Fix 2: Check for errors in list command
@@ -2834,15 +2922,60 @@ ORDER BY count DESC;
         self.run_command(backup_cmd, capture_output=False)
 
         self.print_info("Deactivating workflow...")
-        sql_cmd = f"UPDATE workflow_entity SET active = 0 WHERE id = '{workflow_id}';"
-        db_cmd = f"kubectl exec -it {self.pod_name} -n {self.workspace} -c backup-cron -- sqlite3 database.sqlite \"{sql_cmd}\""
 
-        result = self.run_command(db_cmd)
-        if result is not None:
-            self.print_success(f"Workflow {workflow_id} deactivated")
-            self.print_warning("Redeploy instance for changes to take effect")
-        else:
-            self.print_error("Failed to deactivate workflow")
+        # Run UPDATE query with error capture
+        update_sql = f"UPDATE workflow_entity SET active = 0 WHERE id = '{workflow_id}';"
+        cmd = [
+            'kubectl', 'exec', '-i',
+            self.pod_name, '-n', self.workspace,
+            '-c', 'backup-cron', '--',
+            'sqlite3', 'database.sqlite'
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                input=update_sql,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                self.print_error(f"Failed to deactivate workflow")
+                if result.stderr:
+                    print(f"\nError details: {result.stderr}")
+                input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+                return
+
+        except Exception as e:
+            self.print_error(f"Failed to deactivate workflow: {e}")
+            input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
+            return
+
+        # Verify the change was applied
+        verify_sql = f"SELECT active FROM workflow_entity WHERE id = '{workflow_id}';"
+        try:
+            verify_result = subprocess.run(
+                cmd,
+                input=verify_sql,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if verify_result.returncode == 0 and verify_result.stdout.strip():
+                active_value = verify_result.stdout.strip()
+                if active_value == '0':
+                    self.print_success(f"Workflow {workflow_id} deactivated successfully")
+                    self.print_warning("Redeploy instance for changes to take effect")
+                else:
+                    self.print_error(f"Failed to verify deactivation. Workflow active status: {active_value}")
+            else:
+                self.print_warning("Could not verify deactivation - workflow may not exist")
+
+        except Exception as e:
+            self.print_warning(f"Could not verify deactivation: {e}")
 
         input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
@@ -2990,7 +3123,7 @@ ORDER BY count DESC;
     def show_pre_menu(self):
         """Show pre-menu for operation mode selection"""
         print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.4.1':^60}{Colors.END}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'SUPPORT MEDIC ASSISTANT v1.4.2':^60}{Colors.END}")
         print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 60}{Colors.END}\n")
 
         print(f"{Colors.BOLD}Select operation mode:{Colors.END}\n")
@@ -3062,11 +3195,20 @@ ORDER BY count DESC;
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
 
+        # Get backup limit from user
+        limit = self.get_backup_limit()
+
+        # Build command with limit
+        if limit == 'all':
+            limit_flag = '--all'
+        else:
+            limit_flag = f'--limit {limit}'
+
         # List backups
         self.print_info(f"Listing backups for '{self.workspace}'...")
         print()
 
-        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list {limit_flag}"
         result = self.run_command(list_cmd, capture_output=True, check=False)
 
         # Check for errors or empty result
@@ -3170,11 +3312,20 @@ ORDER BY count DESC;
             input(f"\n{Colors.CYAN}Press Enter...{Colors.END}")
             return
 
+        # Get backup limit from user
+        limit = self.get_backup_limit()
+
+        # Build command with limit
+        if limit == 'all':
+            limit_flag = '--all'
+        else:
+            limit_flag = f'--limit {limit}'
+
         # List backups first
         self.print_info(f"Available backups for '{self.workspace}':")
         print()
 
-        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list"
+        list_cmd = f"kubectl exec --context services-gwc-1 -n workflow-exporter -i deploy/workflow-exporter -- pnpm wf {self.workspace} list {limit_flag}"
         list_result = self.run_command(list_cmd, capture_output=True, check=False)
 
         # Check for errors in list command

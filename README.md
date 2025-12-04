@@ -5,12 +5,17 @@ A Python CLI tool that streamlines n8n Support Medic operations with an interact
 
 ## Features
 
-- Interactive menu-driven interface
+- Interactive menu-driven interface with **7 categorized submenus** (v1.4.2)
 - Auto-discovery of pod names
 - Automatic downloads to ~/Downloads folder
 - Safety confirmations for destructive operations
 - Colour-coded output for better readability
 - Database backup before modifications
+- **v1.4.2:** Configurable backup list limit (20/50/100/all backups)
+- **v1.4.2:** Health Check as direct action from main menu
+- **v1.4.2:** Storage Diagnostics with disk, database, and binary data analysis
+- **v1.4.2:** Clear queued executions (status=new)
+- **v1.4.2:** Prune binary data via bfp-9000 sidecar
 - **v1.4:** OOM Investigation with deep database analysis and report generation
 - **v1.3:** Pre-menu for operation mode selection
 - **v1.3:** Deleted instance recovery (list/export workflows from backups)
@@ -136,38 +141,68 @@ The tool will automatically:
 
 ### 4. Select an Operation
 
-Available operations:
+**v1.4.2 Menu Structure:** The main menu now has 7 categorized submenus for better organization:
 
-**Health Check:**
-- `0` - Provides a quick glance status of Pod Health, DB Size, Number of Restarts etc
+```
+╔══════════════════════════════════════════════════════════════╗
+║              SUPPORT MEDIC ASSISTANT v1.4.2                   ║
+╚══════════════════════════════════════════════════════════════╝
 
-**Workflow Management:**
-- `1` - Export workflows (from live instance) - Saves to Downloads as `.json.gz`
-- `2` - Export workflows (from backup) - Lists backups, lets you choose, saves as `.zip`
-- `3` - Import workflows - Shows files in Downloads, imports selected file
-- `4` - Deactivate all workflows - Confirms, takes backup, deactivates all
-- `5` - Deactivate specific workflow - Enter workflow ID to deactivate
+Workspace: example-user | Cluster: prod-users-gwc-3
 
-**Execution Management:**
-- `6` - Check execution by ID - Shows execution summary and error details
-- `7` - Cancel pending executions - Counts, confirms, cancels all pending
-- `8` - Cancel waiting executions - Counts, confirms, cancels all waiting
+1. Health Check                  ← Direct action (runs immediately)
+2. Workflow Operations
+3. Execution Management
+4. Database & Storage
+5. User & Access
+6. Logs
+7. Settings
 
-**Maintenance:**
-- `9` - Take backup - Creates manual backup
-- `10` - View recent logs - Shows last N lines of n8n logs
-- `11` - Database troubleshooting (guided) - Pre-built queries for common issues
-  - **v1.4:** Option 9 - OOM Investigation with deep analysis and report generation
-- `12` - Redeploy instance - Shows cloudbot command to run in Slack
+q. Quit
+```
 
-**v1.2 New Features:**
-- `14` - Download logs - Download n8n, backup, k8s events, or execution logs
-- `15` - Disable 2FA - Disable multi-factor authentication for a user
-- `16` - Change owner email - Update workspace owner email address
+#### **1. Health Check** (Direct Action)
+Runs immediately - no submenu. Shows:
+- Pod status, container readiness, restart count
+- Database size and connection status
+- Recent errors and execution counts
 
-**Navigation:**
-- `13` - Change workspace/cluster - Start over with different workspace
-- `q` - Quit
+#### **2. Workflow Operations**
+- Export workflows (live instance) - Saves to Downloads as `.json.gz`
+- Export workflows (from backup) - **v1.4.2: Choose 20/50/100/all backups**
+- Import workflows
+- Deactivate all workflows
+- Deactivate specific workflow
+
+#### **3. Execution Management**
+- Check execution by ID
+- Cancel pending executions (status=pending)
+- Cancel waiting executions (status=waiting)
+- **v1.4.2: Clear queued executions** (status=new) - Takes backup first
+
+#### **4. Database & Storage**
+- Database troubleshooting (guided) - **Includes OOM Investigation (v1.4)**
+- **v1.4.2: Storage diagnostics** - Disk, database, execution counts, binary data analysis
+- **v1.4.2: Prune binary data** - Via bfp-9000 sidecar
+- Take backup
+
+#### **5. User & Access**
+- Disable 2FA
+- Change owner email
+
+#### **6. Logs**
+- View recent logs
+- Download log bundle
+
+#### **7. Settings**
+- Change workspace/cluster
+- Redeploy instance
+
+#### **Pre-Menu: Deleted Instance Recovery** (v1.3)
+- List available backups - **v1.4.2: Choose 20/50/100/all**
+- Export workflows (latest backup)
+- Export workflows (select backup) - **v1.4.2: Choose 20/50/100/all**
+- Back to start
 
 ## Examples
 
@@ -177,13 +212,15 @@ Available operations:
 $ cloudmedic
 
 ╔══════════════════════════════════════════════════════════════╗
-║              SUPPORT MEDIC ASSISTANT v1.3                    ║
+║              SUPPORT MEDIC ASSISTANT v1.4.2                   ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Select operation mode:
 
 1. Full medic operations (live instance)
 2. Recover workflows from deleted instance
+
+q. Quit
 
 Select option: 2
 
@@ -226,14 +263,33 @@ Enter cluster number: 48
 ℹ Finding pod for workspace: myworkspace...
 ✓ Found pod: myworkspace-n8n-6856cbbf6d-xk2wq
 
-Main Menu
-Workspace: myworkspace
-Cluster: prod-users-gwc-48
+╔══════════════════════════════════════════════════════════════╗
+║              SUPPORT MEDIC ASSISTANT v1.4.2                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+Workspace: myworkspace | Cluster: prod-users-gwc-48
 Pod: myworkspace-n8n-6856cbbf6d-xk2wq
 
-1. Export workflows (from live instance)
+1. Health Check
+2. Workflow Operations
+3. Execution Management
+4. Database & Storage
+5. User & Access
+6. Logs
+7. Settings
+
+q. Quit
+
+Select an option: 2
+
+Workflow Operations
+1. Export workflows (live instance)
 2. Export workflows (from backup)
-...
+3. Import workflows
+4. Deactivate all workflows
+5. Deactivate specific workflow
+
+b. Back to main menu
 
 Select an option: 1
 
@@ -610,6 +666,104 @@ Use OOM Investigation when:
 - **Symptom**: Many pending executions (> 100)
 - **Cause**: Workflows triggering faster than they can execute
 - **Solution**: Cancel pending queue, fix trigger logic
+
+### Example 9: Storage Diagnostics (v1.4.2)
+
+```
+Main Menu → 4. Database & Storage → 2. Storage diagnostics
+
+╔══════════════════════════════════════════════════════════════╗
+║                  STORAGE DIAGNOSTICS                          ║
+╚══════════════════════════════════════════════════════════════╝
+
+Analyzing storage usage...
+
+──────────────────────────────────────────────────
+ 1. DISK USAGE
+──────────────────────────────────────────────────
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda1       100G   45G   55G  45% /data
+
+──────────────────────────────────────────────────
+ 2. DATABASE SIZE
+──────────────────────────────────────────────────
+Database: 561M database.sqlite
+
+Table Breakdown:
+  execution_data: 412.3 MB
+  execution_entity: 89.5 MB
+  workflow_entity: 15.2 MB
+
+──────────────────────────────────────────────────
+ 3. EXECUTION COUNTS
+──────────────────────────────────────────────────
+Total Executions: 125,432
+
+By Status:
+  success: 98,234
+  error: 15,678
+  waiting: 234
+
+Last 7 Days:
+  2025-12-03: 1,234 executions
+  2025-12-02: 2,345 executions
+  2025-12-01: 1,567 executions
+
+──────────────────────────────────────────────────
+ 4. BINARY DATA
+──────────────────────────────────────────────────
+Binary Data Entries: 45,678
+Total Size: 156.7 MB
+
+⚠ Binary data is 156.7 MB - consider pruning
+
+Top Workflows by Stored Data:
+  1. Data Processing Flow (xyz123): 78.4 MB [ACTIVE]
+  2. Webhook Handler (abc456): 45.2 MB [inactive]
+  3. Daily Sync (def789): 23.1 MB [ACTIVE]
+
+──────────────────────────────────────────────────
+ 5. RECOMMENDATIONS
+──────────────────────────────────────────────────
+• Run 'Prune binary data' to clean old execution data
+• Inactive workflows have significant stored data - consider cleanup
+✓ Disk usage is healthy (45%)
+```
+
+### Example 10: Configurable Backup List (v1.4.2)
+
+```
+Main Menu → 2. Workflow Operations → 2. Export workflows (from backup)
+
+╔══════════════════════════════════════════════════════════════╗
+║              Export Workflows (From Backup)                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+ℹ Switching to services-gwc-1...
+
+How many backups to display? [20/50/100/all]
+Enter choice (default 20): 100
+
+ℹ Listing available backups...
+
+Available backups:
+myworkspace_sqldump_20251203_0315.tar
+myworkspace_sqldump_20251202_0315.tar
+myworkspace_sqldump_20251201_0315.tar
+...
+[100 backups shown]
+
+Enter backup name (or press Enter for latest): myworkspace_sqldump_20251115_0315.tar
+
+ℹ Exporting workflows...
+✓ Workflows downloaded to: ~/Downloads/myworkspace-workflows-backup-20251115.zip
+ℹ File size: 287.5 KB
+```
+
+**Use Cases:**
+- Finding older backups beyond the default 20
+- Recovering workflows from a specific date
+- Investigating when a workflow was deleted
 
 ### Best Practices
 
